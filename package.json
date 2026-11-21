@@ -1,0 +1,22 @@
+{
+  "name": "talk-less-learn-more",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A top-down pixel RPG about talking to customers well, built from Nielsen Norman Group research articles.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/atkinson-hyperlegible": "5.3.0",
+    "@fontsource/pixelify-sans": "5.3.0",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "5.4.21"
+  }
+}
