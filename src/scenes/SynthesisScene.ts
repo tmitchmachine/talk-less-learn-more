@@ -14,7 +14,9 @@ export class SynthesisScene extends Phaser.Scene {
 
   create() {
     this.alive = true;
+    document.body.dataset.scene = 'synth';
     this.g = this.add.graphics();
+    this.g.postFX?.addBlur(0, 1, 1, 0.8);
     this.draw();
     this.scale.on('resize', this.draw, this);
     this.events.once('shutdown', () => { this.scale.off('resize', this.draw, this); this.alive = false; });
@@ -39,6 +41,8 @@ export class SynthesisScene extends Phaser.Scene {
       g.fillStyle(0x000000, 0.18).fillRect(x + u, y + u, 18 * u, 18 * u);
       g.fillStyle(cols[i % cols.length], 0.55).fillRect(x, y, 18 * u, 18 * u);
     }
+    // A warm desk lamp from above, falling off to shadow at the bottom
+    g.fillGradientStyle(0xfff0c8, 0xfff0c8, 0x1a1208, 0x1a1208, 0.12, 0.12, 0.45, 0.45).fillRect(0, 0, w, h);
   }
 
   private async run() {

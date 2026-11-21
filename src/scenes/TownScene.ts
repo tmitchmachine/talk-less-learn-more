@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { buildTown, H, T, W, type Facing } from '../world/map';
-import { SOLID_TILES, TILE, type Emote } from '../art/draw';
+import { SOLID_TILES, TILE, TREE_KINDS, makeGroundDetail, mulberry32, type Emote } from '../art/draw';
 import { CAST } from '../data/cast';
 import { SESSIONS } from '../data/sessions';
 import { NOTICEBOARD, TOWNSFOLK, maeLines } from '../data/townsfolk';
@@ -21,6 +21,7 @@ interface Item {
 type GateName = 'east' | 'south';
 type Keys = Record<'UP' | 'DOWN' | 'LEFT' | 'RIGHT' | 'W' | 'A' | 'S' | 'D' | 'E' | 'SPACE' | 'ENTER' | 'J' | 'ESC', Phaser.Input.Keyboard.Key>;
 
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SPEED = 74;
 const REACH = 22;
 const IDLE: Record<Facing, string> = { down: '0', up: '3', left: '6', right: '6' };
@@ -51,6 +52,11 @@ export class TownScene extends Phaser.Scene {
   private joy = { on: false, sx: 0, sy: 0, dx: 0, dy: 0, t: 0, moved: false };
   private labMarker!: Phaser.GameObjects.Sprite;
   private tipIndex = 0;
+  private clouds!: Phaser.GameObjects.TileSprite;
+  private dust!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private dustT = 0;
+  private glowing: Phaser.GameObjects.Sprite | null = null;
+  private glowFx: Phaser.FX.Glow | null = null;
 
   constructor() { super('Town'); }
 
@@ -61,6 +67,9 @@ export class TownScene extends Phaser.Scene {
     this.near = null;
     this.gates = { east: [], south: [] };
     this.gateOpen = { east: false, south: false };
+    this.glowing = null;
+    this.glowFx = null;
+    document.body.dataset.scene = 'town';
     const town = this.town;
 
     // Ground
@@ -79,10 +88,32 @@ export class TownScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, W * T, H * T);
     this.solids = this.physics.add.staticGroup();
 
+    // Grass fringes, shorelines and tufts over the tile grid
+    if (!this.textures.exists('ground-fx')) makeGroundDetail(this, town.tiles, T);
+    this.add.image(0, 0, 'ground-fx').setOrigin(0, 0).setDepth(-9);
+
+    // Trees: tall sprites sorted by their base, so you can walk behind the canopy
+    const trnd = mulberry32(31);
+    const water: [number, number][] = [];
+    const flowers: [number, number][] = [];
+    for (let ty = 0; ty < H; ty++) for (let tx = 0; tx < W; tx++) {
+      const v = town.tiles[ty][tx];
+      if (v === TILE.water) water.push([tx, ty]);
+      if (v === TILE.flowers) flowers.push([tx, ty]);
+      if (v !== TILE.tree) continue;
+      const edge = tx < 2 || ty < 2 || tx >= W - 2 || ty >= H - 2;
+      const r = trnd();
+      const kind = edge ? (r < 0.5 ? TREE_KINDS[0] : r < 0.78 ? TREE_KINDS[1] : TREE_KINDS[3]) : (r < 0.45 ? TREE_KINDS[0] : r < 0.65 ? TREE_KINDS[2] : r < 0.85 ? TREE_KINDS[1] : TREE_KINDS[3]);
+      const x = tx * T + 8 + Math.round((trnd() - 0.5) * 2), y = ty * T + 15;
+      this.add.image(x + 2, y - 1, 'softshadow').setDisplaySize(26, 9).setAlpha(0.42).setDepth(-5);
+      this.add.image(x, y, kind).setOrigin(0.5, 1).setDepth(y).setFlipX(trnd() < 0.5);
+    }
+
     // Buildings
     for (const b of town.buildings) {
       const img = this.add.image(b.tx * T, b.ty * T, b.key).setOrigin(0, 0);
       img.setDepth(img.y + img.height);
+      this.add.image(img.x + img.width / 2 + 4, img.y + img.height - 3, 'softshadow').setDisplaySize(img.width * 1.15, 20).setAlpha(0.45).setDepth(-5);
       const top = b.key === 'b-truck' ? 12 : Math.round(img.height * 0.4);
       this.solid(img.x + 2, img.y + top, img.width - 4, img.height - top - 2);
     }
@@ -90,8 +121,14 @@ export class TownScene extends Phaser.Scene {
     for (const p of town.props) {
       const img = this.add.image(p.tx * T + 8, p.ty * T + 15, p.key).setOrigin(0.5, 1);
       img.setDepth(img.y);
+      this.add.image(img.x + 1, img.y - 1, 'softshadow').setDisplaySize(img.width + 6, 6).setAlpha(0.4).setDepth(-5);
       this.solid(img.x - img.width / 2 + 1, img.y - 5, img.width - 2, 5);
+      if (p.key === 'lamp') {
+        const g = this.add.image(img.x, img.y - 25, 'glow').setTint(0xffd98a).setBlendMode(Phaser.BlendModes.ADD).setDisplaySize(40, 40).setAlpha(0.35).setDepth(8500);
+        this.tweens.add({ targets: g, alpha: 0.2, duration: 1800 + Math.random() * 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      }
     }
+    this.ambience(water, flowers);
     // Barricades
     for (const g of ['east', 'south'] as GateName[]) {
       for (const [tx, ty] of town.gates[g]) {
@@ -109,7 +146,7 @@ export class TownScene extends Phaser.Scene {
     // NPCs
     for (const n of town.npcs) {
       const x = n.tx * T + 8, y = n.ty * T + 8;
-      this.add.image(x, y + 7, 'shadow').setDepth(y + 6);
+      this.add.image(x, y + 7, 'softshadow').setDisplaySize(14, 6).setAlpha(0.55).setDepth(-5);
       const s = this.add.sprite(x, y, `ch-${n.id}`, IDLE[n.face]).setDepth(y + 8).setFlipX(n.face === 'left');
       this.tweens.add({ targets: s, y: y - 1, duration: 520 + Math.random() * 300, yoyo: true, repeat: -1, ease: 'Stepped', delay: Math.random() * 500 });
       this.solid(x - 5, y + 2, 10, 6);
@@ -132,7 +169,7 @@ export class TownScene extends Phaser.Scene {
     this.tweens.add({ targets: this.labMarker, y: ly - 24, duration: 400, yoyo: true, repeat: -1, ease: 'Stepped' });
 
     // Player
-    this.pShadow = this.add.image(0, 0, 'shadow');
+    this.pShadow = this.add.image(0, 0, 'softshadow').setDisplaySize(14, 6).setAlpha(0.55);
     this.player = this.physics.add.sprite(town.start.tx * T + 8, town.start.ty * T + 8, 'ch-player', '0');
     (this.player.body as Phaser.Physics.Arcade.Body).setSize(10, 6).setOffset(3, 10);
     this.player.setCollideWorldBounds(true);
@@ -185,6 +222,73 @@ export class TownScene extends Phaser.Scene {
     return z;
   }
 
+  /** Living-world touches: cloud shadows, light motes, butterflies, water glints, footstep dust. */
+  private ambience(water: [number, number][], flowers: [number, number][]) {
+    const ww = W * T, wh = H * T;
+    this.clouds = this.add.tileSprite(0, 0, ww, wh, 'clouds').setOrigin(0, 0).setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(8000);
+    this.dust = this.add.particles(0, 0, 'mote', {
+      lifespan: 420, speedX: { min: -8, max: 8 }, speedY: { min: -10, max: -2 },
+      scale: { start: 0.18, end: 0.42 }, alpha: { start: 0.45, end: 0 }, tint: 0xf1e4c4, emitting: false,
+    }).setDepth(-4);
+    // Players who ask their system for less motion get a still, calm town.
+    if (REDUCED) return;
+
+    // Warm motes of light drifting on the breeze
+    this.add.particles(0, 0, 'mote', {
+      x: { min: 0, max: ww }, y: { min: 0, max: wh },
+      lifespan: { min: 5000, max: 9000 },
+      speedX: { min: -3, max: 7 }, speedY: { min: -6, max: 1 },
+      scale: { min: 0.12, max: 0.32 },
+      alpha: { values: [0, 0.75, 0], interpolation: 'linear' },
+      tint: [0xfff4c2, 0xffe08a, 0xffffff],
+      blendMode: Phaser.BlendModes.ADD,
+      frequency: 60,
+      maxAliveParticles: 160,
+    }).setDepth(8600);
+
+    // Butterflies that wander between the flowers
+    if (!this.anims.exists('butterfly-flap')) {
+      this.anims.create({ key: 'butterfly-flap', frames: [{ key: 'butterfly', frame: '0' }, { key: 'butterfly', frame: '1' }], frameRate: 9, repeat: -1 });
+    }
+    const spots = flowers.length ? flowers : [[10, 6], [24, 18], [6, 15]] as [number, number][];
+    const tints = [0xffd84d, 0xffffff, 0xff9fc6, 0x9fc8ff];
+    for (let i = 0; i < 7; i++) {
+      const [fx, fy] = spots[Math.floor(Math.random() * spots.length)];
+      const b = this.add.sprite(fx * T + 8, fy * T + 4, 'butterfly', '0').setTint(tints[i % tints.length]).setDepth(8700).play({ key: 'butterfly-flap', startFrame: i % 2 });
+      const hop = () => {
+        if (!b.active) return;
+        const [nx, ny] = Math.random() < 0.3 ? spots[Math.floor(Math.random() * spots.length)] : [b.x / T + (Math.random() - 0.5) * 4, b.y / T + (Math.random() - 0.5) * 3];
+        const tx = Phaser.Math.Clamp(nx * T + 8, 40, ww - 40), ty = Phaser.Math.Clamp(ny * T, 40, wh - 40);
+        b.setFlipX(tx < b.x);
+        const d = Phaser.Math.Distance.Between(b.x, b.y, tx, ty);
+        this.tweens.add({ targets: b, x: tx, y: ty, duration: Math.max(900, d * 45), ease: 'Sine.easeInOut', onComplete: () => this.time.delayedCall(300 + Math.random() * 1500, hop) });
+      };
+      this.time.delayedCall(Math.random() * 1500, hop);
+    }
+
+    // Glints of sun on the pond
+    if (water.length) {
+      this.time.addEvent({
+        delay: 220, loop: true,
+        callback: () => {
+          const [tx, ty] = water[Math.floor(Math.random() * water.length)];
+          const s = this.add.image(tx * T + Math.random() * T, ty * T + Math.random() * T, 'spark').setDepth(-8).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
+          this.tweens.add({ targets: s, alpha: 0.9, duration: 300, yoyo: true, onComplete: () => s.destroy() });
+        },
+      });
+    }
+  }
+
+  private setGlow(s: Phaser.GameObjects.Sprite | null) {
+    if (this.glowing === s) return;
+    if (this.glowing && this.glowFx) { this.glowing.preFX?.remove(this.glowFx); this.glowFx = null; }
+    this.glowing = s;
+    if (s?.preFX) {
+      s.preFX.setPadding(4);
+      this.glowFx = s.preFX.addGlow(0xfff1b8, 3, 0, false, 0.1, 6);
+    }
+  }
+
   private fitZoom() {
     const z = Phaser.Math.Clamp(Math.floor(Math.min(this.scale.width / 300, this.scale.height / 170)), 2, 6);
     this.cameras.main.setZoom(z);
@@ -226,6 +330,7 @@ export class TownScene extends Phaser.Scene {
   }
 
   private onResume() {
+    document.body.dataset.scene = 'town';
     this.cameras.main.fadeIn(350);
     this.player.setVelocity(0);
     ui.hud(true);
@@ -397,7 +502,11 @@ export class TownScene extends Phaser.Scene {
 
   /* ---------------- loop ---------------- */
 
-  update() {
+  update(_time: number, delta: number) {
+    if (!REDUCED) {
+      this.clouds.tilePositionX -= delta * 0.004;
+      this.clouds.tilePositionY -= delta * 0.0016;
+    }
     if (this.attract) return;
     const k = this.keys;
     const busy = ui.busy() || this.cine;
@@ -416,6 +525,8 @@ export class TownScene extends Phaser.Scene {
     this.player.setVelocity(vx * SPEED, vy * SPEED);
 
     if (len > 0) {
+      this.dustT -= delta;
+      if (this.dustT <= 0) { this.dustT = 190; this.dust.emitParticleAt(this.player.x - vx * 4, this.player.y + 7, 1); }
       this.facing = Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 'left' : 'right') : vy < 0 ? 'up' : 'down';
       const anim = this.facing === 'up' ? 'player-walk-up' : this.facing === 'down' ? 'player-walk-down' : 'player-walk-side';
       this.player.anims.play(anim, true);
@@ -427,7 +538,7 @@ export class TownScene extends Phaser.Scene {
     this.player.setDepth(this.player.y + 8);
     this.pShadow.setPosition(this.player.x, this.player.y + 7).setDepth(this.player.y + 6);
 
-    if (busy) { ui.prompt(null); return; }
+    if (busy) { ui.prompt(null); this.setGlow(null); return; }
 
     // Nearest thing to talk to
     const fx = this.player.x, fy = this.player.y + 4;
@@ -438,6 +549,7 @@ export class TownScene extends Phaser.Scene {
       if (d < bestD) { bestD = d; best = it; }
     }
     this.near = best;
+    this.setGlow(best?.npc ?? null);
     ui.prompt(best ? best.label : null, () => this.interact());
   }
 }

@@ -5,10 +5,20 @@ import { MOVES, SESSIONS, type Choice, type Session } from '../data/sessions';
 import { BINS, type BinKey, type SortCard } from '../data/sort';
 import { PORTRAIT_URL } from '../art/draw';
 import { sfx, music } from '../audio';
+import { voice } from '../voice';
 import { state, save, rank, totalStars, MAX_STARS, objective } from '../state';
 
 const root = document.getElementById('ui')!;
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Shows a "speaking" equalizer next to whoever is talking.
+voice.onChange((who) => {
+  root.querySelectorAll<HTMLElement>('[data-who]').forEach((n) => n.classList.toggle('speaking', !!who && n.dataset.who === who));
+});
+
+const SPEAKER_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
+const EQ = `<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
+const listenBtn = (label = 'Listen') => (voice.supported ? `<button class="listen" data-a="listen" aria-label="${label}" title="${label}">${SPEAKER_ICON}</button>` : '');
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const arr = <T,>(x: T | T[]) => (Array.isArray(x) ? x : [x]);
@@ -75,7 +85,7 @@ function typeInto(node: HTMLElement, text: string, cps = 48): Typer {
   const id = window.setInterval(() => {
     i += 1;
     node.textContent = text.slice(0, i);
-    if (i % 3 === 0 && text[i - 1] !== ' ') sfx.blip();
+    if (i % 3 === 0 && text[i - 1] !== ' ' && !voice.on()) sfx.blip();
     if (i >= text.length) finish();
   }, 1000 / cps);
   function finish() {
@@ -107,24 +117,65 @@ function modal(html: string, cls = '', wrapCls = '') {
   };
 }
 
+type BoolSetting = 'timer' | 'sound' | 'music' | 'voice' | 'narrate';
+const RATES: [number, string][] = [[0.85, 'Relaxed'], [1, 'Normal'], [1.2, 'Brisk']];
+
 function settingsHtml() {
-  const row = (k: keyof typeof state.settings, label: string, hint: string) =>
+  const row = (k: BoolSetting, label: string, hint: string) =>
     `<label class="toggle"><input type="checkbox" data-set="${k}" ${state.settings[k] ? 'checked' : ''}><span class="tg"></span><span><b>${label}</b><small>${hint}</small></span></label>`;
+  const voices = voice.supported
+    ? `${row('voice', 'Character voices', 'Everyone speaks their lines out loud, each with their own voice.')}
+       ${row('narrate', 'Read everything aloud', 'Also reads scene notes, your own lines, coaching tips and results.')}
+       <div class="seg-row"><b>Voice speed</b><div class="seg" role="radiogroup" aria-label="Voice speed">${RATES.map(([v, l]) =>
+         `<button role="radio" data-rate="${v}" aria-checked="${state.settings.voiceRate === v}">${l}</button>`).join('')}</div></div>`
+    : `<p class="muted">Spoken dialogue isn’t available in this browser.</p>`;
   return `<div class="settings">
+    <h3 class="set-h">Audio</h3>
+    ${voices}
+    ${row('sound', 'Sound effects', 'Chimes and soft clicks.')}
+    ${row('music', 'Music', 'A gentle town tune. It gets quieter while people talk.')}
+    <h3 class="set-h">Pace</h3>
     ${row('timer', 'Choice timer', 'Answer within 25 seconds, or you stay silent. Turn off for a relaxed pace.')}
-    ${row('sound', 'Sound effects', 'Blips, chimes and buzzes.')}
-    ${row('music', 'Music', 'A gentle town tune.')}
   </div>`;
 }
 function wireSettings(box: HTMLElement) {
   box.querySelectorAll<HTMLInputElement>('input[data-set]').forEach((inp) => {
     inp.onchange = () => {
-      const k = inp.dataset.set as keyof typeof state.settings;
+      const k = inp.dataset.set as BoolSetting;
       state.settings[k] = inp.checked;
       save();
       if (k === 'music') music.sync();
+      if (k === 'voice') { if (inp.checked) void voice.say('Voices on.', 'mae'); else voice.stop(); }
+      if (k === 'narrate' && inp.checked) void voice.say('I’ll read everything aloud.', 'narrator');
       sfx.select();
     };
+  });
+  box.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((b) => {
+    b.onclick = () => {
+      state.settings.voiceRate = Number(b.dataset.rate);
+      save();
+      box.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+      void voice.say('This is how fast I’ll talk.', 'mae', { force: true });
+    };
+  });
+}
+
+/** Lip sync: swaps a portrait to its open-mouth frame while that person's voice is playing. */
+function lipSync(img: HTMLImageElement, who: () => string | undefined) {
+  let flap = 0;
+  const id = window.setInterval(() => {
+    const f = who();
+    if (!f || !PORTRAIT_URL[`${f}-talk`]) return;
+    const k = voice.current() === f && ++flap % 3 !== 0 ? `${f}-talk` : f;
+    if (img.dataset.k !== k) { img.src = PORTRAIT_URL[k]; img.dataset.k = k; }
+  }, 130);
+  return () => clearInterval(id);
+}
+
+/** Wires a speaker button to read `text` again on demand. */
+function wireListen(scope: HTMLElement, fn: () => void) {
+  scope.querySelectorAll<HTMLButtonElement>('[data-a=listen]').forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); sfx.unlockAudio(); fn(); };
   });
 }
 
@@ -149,6 +200,7 @@ export const ui = {
         <h1>Talk Less,<br><em>Learn More</em></h1>
       </div>
       <p class="title-sub">A pixel RPG about talking to customers. Ask well, listen more, and fill the insight wall.</p>
+      ${voice.supported ? `<p class="title-voice">${SPEAKER_ICON}<span>Fully voiced. Turn your sound on.</span></p>` : ''}
       <div class="title-btns">
         ${opts.canContinue ? `<button class="pbtn" data-a="cont">Continue</button>` : ''}
         <button class="pbtn ${opts.canContinue ? 'alt' : ''}" data-a="new">${opts.canContinue ? 'New game' : 'Start'}</button>
@@ -160,7 +212,7 @@ export const ui = {
     `, 'title', 'title-wrap');
     const panel = m.box.querySelector<HTMLElement>('.title-panel')!;
     const btns = m.box.querySelector<HTMLElement>('.title-btns')!;
-    const go = (fn: () => void) => { off(); m.close(); sfx.unlockAudio(); music.sync(); sfx.select(); fn(); };
+    const go = (fn: () => void) => { off(); m.close(); sfx.unlockAudio(); voice.unlock(); music.sync(); sfx.select(); fn(); };
     const confirmNew = () => {
       btns.innerHTML = `<p class="confirm">Start over? Your stars, insights and moves will be erased.</p>
         <button class="pbtn" data-a="yes">Yes, start over</button><button class="pbtn alt" data-a="no">Keep my progress</button>`;
@@ -184,9 +236,12 @@ export const ui = {
               <li><b>Openness</b> drops when you lead, pitch or interrupt. At zero, the customer leaves.</li>
               <li><b>Insight</b> rises when customers tell you what really happens. Strong moves pin sticky notes to your wall.</li>
               <li><b>Bias</b> rises when your words end up in their mouths. Your score loses half a point for each point of bias.</li>
+              <li><b>Listen</b> to any line again with the speaker button. Turn on “Read everything aloud” in Settings to hear coaching tips too.</li>
             </ul>`;
           }
           if (a === 'settings') {
+            sfx.unlockAudio();
+            voice.unlock();
             panel.hidden = !(panel.hidden || panel.dataset.v !== 'settings');
             panel.dataset.v = 'settings';
             panel.innerHTML = settingsHtml();
@@ -238,26 +293,37 @@ export const ui = {
     return new Promise((resolve) => {
       busyCount++;
       const box = el(`<div class="dlg panel" role="dialog" aria-label="Conversation">
-        <img class="dlg-face" alt="" hidden>
-        <div class="dlg-body"><div class="dlg-name"></div><div class="dlg-text"></div></div>
-        <div class="dlg-next" aria-hidden="true">▼</div>
-        <span class="dlg-hint">Space / tap</span>
+        <div class="dlg-face-wrap" hidden><img class="dlg-face" alt=""></div>
+        <div class="dlg-body">
+          <div class="dlg-head"><div class="dlg-name"></div>${EQ}${listenBtn('Hear this line again')}</div>
+          <div class="dlg-text"></div>
+        </div>
+        <div class="dlg-foot" aria-hidden="true"><span class="dlg-count"></span><span class="dlg-hint">Space / tap</span><span class="dlg-next">▼</span></div>
       </div>`);
       layer.append(box);
+      const faceWrap = box.querySelector<HTMLElement>('.dlg-face-wrap')!;
       const img = box.querySelector<HTMLImageElement>('.dlg-face')!;
       const name = box.querySelector<HTMLElement>('.dlg-name')!;
       const text = box.querySelector<HTMLElement>('.dlg-text')!;
+      const count = box.querySelector<HTMLElement>('.dlg-count')!;
       let i = 0;
       let tw: Typer | null = null;
+      const speak = (force = false) => { const p = pages[i]; void voice.say(p.text, p.face ?? 'narrator', { force }); };
       const show = () => {
         const p = pages[i];
         name.textContent = p.name;
-        if (p.face && PORTRAIT_URL[p.face]) { img.src = PORTRAIT_URL[p.face]; img.hidden = false; } else img.hidden = true;
+        box.dataset.who = p.face ?? 'narrator';
+        count.textContent = pages.length > 1 ? `${i + 1} / ${pages.length}` : '';
+        if (p.face && PORTRAIT_URL[p.face]) { img.src = PORTRAIT_URL[p.face]; img.dataset.k = p.face; faceWrap.hidden = false; } else faceWrap.hidden = true;
+        box.classList.toggle('noface', faceWrap.hidden);
         box.classList.remove('ready');
         tw = typeInto(text, p.text);
+        speak();
         void tw.done.then(() => box.classList.add('ready'));
       };
-      const close = () => { off(); box.remove(); busyCount--; lastClose = performance.now(); resolve(); };
+      wireListen(box, () => speak(true));
+      const stopSync = lipSync(img, () => pages[i]?.face);
+      const close = () => { off(); stopSync(); voice.stop(); box.remove(); busyCount--; lastClose = performance.now(); resolve(); };
       const advance = () => {
         if (tw && !tw.finished) { tw.skip(); return; }
         i++;
@@ -266,6 +332,7 @@ export const ui = {
       box.addEventListener('click', advance);
       const off = pushKeys((e) => {
         if (e.key === 'Escape') { close(); return true; }
+        if (e.key === 'l' || e.key === 'L') { speak(true); return true; }
         if (e.key === 'Enter' || e.key === ' ' || e.key === 'e' || e.key === 'E') { advance(); return true; }
         return false;
       });
@@ -286,16 +353,23 @@ export const ui = {
             ${rec ? `<div class="intro-best">Best: ${stars(rec.stars)}</div>` : ''}
           </div>
         </div>
-        <p class="intro-greet">“${esc(s.greet)}”</p>
+        <p class="intro-greet"><span>“${esc(s.greet)}”</span>${listenBtn('Hear the briefing')}</p>
         <p>${esc(s.setup)}</p>
         <div class="goal"><b>Research goal</b>${esc(s.goal)}</div>
         <div class="chips">${s.skills.map((k) => `<span>${esc(k)}</span>`).join('')}</div>
         <div class="row-end">
           <button class="pbtn alt" data-a="no">Not now</button>
-          <button class="pbtn" data-a="yes">Start recording ●</button>
+          <button class="pbtn rec-btn" data-a="yes"><i class="rec-dot"></i>Start recording</button>
         </div>
       `, 'intro');
-      const done = (v: boolean) => { off(); m.close(); if (v) sfx.talk(); resolve(v); };
+      const brief = (force = false) => {
+        void voice.say(s.greet, s.id, { force });
+        if (force || voice.narrating()) { void voice.say(s.setup, 'narrator', { queue: true, force }); void voice.say(`Research goal: ${s.goal}`, 'narrator', { queue: true, force }); }
+      };
+      brief();
+      wireListen(m.box, () => brief(true));
+      const stopSync = lipSync(m.box.querySelector<HTMLImageElement>('.intro-face')!, () => s.id);
+      const done = (v: boolean) => { off(); stopSync(); voice.stop(); m.close(); if (v) sfx.talk(); resolve(v); };
       m.box.querySelector<HTMLButtonElement>('[data-a=yes]')!.onclick = () => done(true);
       m.box.querySelector<HTMLButtonElement>('[data-a=no]')!.onclick = () => done(false);
       const off = pushKeys((e) => {
@@ -398,6 +472,7 @@ export const ui = {
   convo: null as null | {
     wrap: HTMLElement; phase: 'idle' | 'typing' | 'choose' | 'coach'; typer: Typer | null;
     choose: ((i: number) => void) | null; n: number; cont: (() => void) | null; off: () => void; timer: number | null;
+    last: { text: string; who: string; mood?: string } | null;
   },
 
   convoOpen(s: Session, onQuit: () => void) {
@@ -417,13 +492,14 @@ export const ui = {
       <div class="cv-bottom panel">
         <div class="cv-ctx" hidden></div>
         <div class="cv-you" hidden></div>
-        <div class="cv-line"><div class="cv-speaker"></div><div class="cv-text"></div></div>
+        <div class="cv-line"><div class="cv-head"><div class="cv-speaker"></div>${EQ}${listenBtn('Hear this line again')}</div><div class="cv-text"></div></div>
         <div class="cv-act"></div>
       </div>
     </div>`);
     layer.append(wrap);
-    const c = { wrap, phase: 'idle' as const, typer: null, choose: null, n: 0, cont: null, off: () => {}, timer: null } as NonNullable<typeof ui.convo>;
+    const c = { wrap, phase: 'idle' as const, typer: null, choose: null, n: 0, cont: null, off: () => {}, timer: null, last: null } as NonNullable<typeof ui.convo>;
     ui.convo = c;
+    wireListen(wrap.querySelector<HTMLElement>('.cv-line')!, () => { if (c.last) void voice.say(c.last.text, c.last.who, { mood: c.last.mood, force: true }); });
     wrap.querySelector<HTMLButtonElement>('.cv-quit')!.onclick = async () => {
       if (await ui.confirm('Leave the session?', 'This session won’t be saved. You can start it again any time.', 'Leave', 'Keep going')) onQuit();
     };
@@ -435,6 +511,7 @@ export const ui = {
         if (n >= 1 && n <= c.n) { c.choose?.(n - 1); return true; }
       }
       if (c.phase === 'coach' && (e.key === ' ' || e.key === 'Enter')) { c.cont?.(); return true; }
+      if ((e.key === 'l' || e.key === 'L') && c.last) { void voice.say(c.last.text, c.last.who, { mood: c.last.mood, force: true }); return true; }
       if (e.key === 'Escape') { wrap.querySelector<HTMLButtonElement>('.cv-quit')!.click(); return true; }
       return false;
     });
@@ -459,7 +536,7 @@ export const ui = {
     c.wrap.querySelector('.cv-t')!.textContent = m.t;
   },
 
-  convoLine(o: { ctx?: string; speaker: string; kind: 'p' | 'obs'; text: string | null }): Promise<void> {
+  convoLine(o: { ctx?: string; speaker: string; voiceId: string; mood?: string; kind: 'p' | 'obs'; text: string | null }): Promise<void> {
     const c = ui.convo!;
     const w = c.wrap;
     const ctx = w.querySelector<HTMLElement>('.cv-ctx')!;
@@ -470,8 +547,13 @@ export const ui = {
     const line = w.querySelector<HTMLElement>('.cv-line')!;
     line.hidden = !o.text;
     line.className = `cv-line ${o.kind === 'obs' ? 'obs' : ''}`;
+    line.dataset.who = o.voiceId;
     w.querySelector('.cv-speaker')!.textContent = o.kind === 'obs' ? `Note from ${o.speaker}` : o.speaker;
-    if (!o.text) { if (o.ctx) srEl.textContent = o.ctx; return Promise.resolve(); }
+    voice.stop();
+    if (o.ctx && voice.narrating()) void voice.say(o.ctx, 'narrator');
+    if (!o.text) { c.last = null; if (o.ctx) srEl.textContent = o.ctx; return Promise.resolve(); }
+    c.last = { text: o.text, who: o.voiceId, mood: o.mood };
+    void voice.say(o.text, o.voiceId, { mood: o.mood, queue: true });
     c.phase = 'typing';
     c.typer = typeInto(w.querySelector<HTMLElement>('.cv-text')!, o.text);
     return c.typer.done.then(() => { c.phase = 'idle'; });
@@ -491,6 +573,7 @@ export const ui = {
         c.phase = 'idle';
         if (c.timer) { clearTimeout(c.timer); c.timer = null; }
         act.querySelectorAll<HTMLButtonElement>('.choice').forEach((b) => (b.disabled = true));
+        voice.stop();
         if (i >= 0) sfx.select();
         resolve(i);
       };
@@ -500,7 +583,7 @@ export const ui = {
     });
   },
 
-  convoReply(o: { you: string; silent?: boolean; toObs?: boolean; speaker: string; kind: 'p' | 'obs'; text?: string }): Promise<void> {
+  convoReply(o: { you: string; silent?: boolean; toObs?: boolean; speaker: string; voiceId: string; mood?: string; kind: 'p' | 'obs'; text?: string }): Promise<void> {
     const c = ui.convo!;
     const w = c.wrap;
     w.querySelector<HTMLElement>('.cv-ctx')!.hidden = true;
@@ -508,13 +591,18 @@ export const ui = {
     const you = w.querySelector<HTMLElement>('.cv-you')!;
     you.hidden = false;
     you.className = `cv-you ${o.silent ? 'silent' : ''}`;
-    you.innerHTML = o.silent ? esc(o.you) : `<b>${o.toObs ? 'You, to Jordan' : 'You'}:</b> ${esc(o.you)}`;
+    you.innerHTML = o.silent ? esc(o.you) : `<b>${o.toObs ? 'You, to Jordan' : 'You'}</b> ${esc(o.you)}`;
+    voice.stop();
+    if (voice.narrating() && !o.silent) void voice.say(o.you, 'player');
     const line = w.querySelector<HTMLElement>('.cv-line')!;
     line.hidden = !o.text;
-    if (!o.text) return Promise.resolve();
+    if (!o.text) { c.last = null; return Promise.resolve(); }
     const stage = /^\(/.test(o.text);
     line.className = `cv-line ${o.kind === 'obs' ? 'obs' : ''} ${stage ? 'stage' : ''}`;
+    line.dataset.who = o.voiceId;
     w.querySelector('.cv-speaker')!.textContent = o.kind === 'obs' ? `Note from ${o.speaker}` : o.speaker;
+    c.last = { text: o.text, who: o.voiceId, mood: o.mood };
+    void voice.say(o.text, o.voiceId, { mood: o.mood, queue: true });
     c.phase = 'typing';
     c.typer = typeInto(w.querySelector<HTMLElement>('.cv-text')!, o.text);
     return c.typer.done.then(() => { c.phase = 'idle'; });
@@ -527,19 +615,28 @@ export const ui = {
     const cls = ch.v === 'best' ? 'best' : ch.v === 'ok' ? 'ok' : 'bad';
     const mark = ch.v === 'best' ? '✓' : ch.v === 'ok' ? '~' : '✕';
     act.innerHTML = `<div class="coach">
-      <div class="coach-head"><span class="chip ${cls}">${mark} ${esc(ch.tag)}</span><span class="delta mono">+${ch.ins} insight · +${ch.bias} bias</span></div>
+      <div class="coach-head"><span class="chip ${cls}">${mark} ${esc(ch.tag)}</span><span class="delta mono">+${ch.ins} insight · +${ch.bias} bias</span>${listenBtn('Hear the coaching tip')}</div>
       ${o.timedOut ? `<p class="coach-time">Time ran out, so you stayed quiet.</p>` : ''}
       ${o.unlocked ? `<div class="unlock"><i class="mini-note"></i>Pinned to your wall: “${esc(o.unlocked)}”</div>` : ''}
       ${o.newMove ? `<div class="newmove">New move for your journal: <b>${esc(ch.tag)}</b></div>` : ''}
       <p class="coach-note">${esc(ch.note)}</p>
       ${ch.quote ? `<blockquote>${esc(ch.quote)}</blockquote>` : ''}
       ${o.best ? `<p class="coach-better"><b>Stronger move (${esc(o.best.tag)}):</b> ${esc(o.best.say)}</p>` : ''}
-      <div class="coach-foot"><span class="src">Source: ${srcLinks(ch.src)}</span><button class="pbtn" data-a="cont">${o.left ? 'End session' : 'Continue'} <kbd>␣</kbd></button></div>
+      <div class="coach-foot"><span class="src">Source: ${srcLinks(ch.src)}</span><button class="pbtn" data-a="cont">${o.left ? 'End session' : 'Continue'} <kbd>Space</kbd></button></div>
     </div>`;
     cv.wrap.querySelector<HTMLElement>('.cv-bottom')!.scrollTop = 0;
     cv.phase = 'coach';
+    const tip = () => [
+      `${ch.v === 'best' ? 'Strong move' : ch.v === 'ok' ? 'Okay move' : 'Weak move'}: ${ch.tag}.`,
+      o.unlocked ? `Pinned to your wall: ${o.unlocked}.` : '',
+      ch.note,
+      o.best ? `A stronger move would be ${o.best.tag}: ${o.best.say}` : '',
+    ].filter(Boolean).join(' ');
+    wireListen(act, () => void voice.say(tip(), 'mae', { force: true }));
+    // Coaching waits for the customer to finish their line, then Mae reads it (when narration is on).
+    if (voice.narrating()) void voice.say(tip(), 'mae', { queue: true });
     return new Promise((resolve) => {
-      const go = () => { if (cv.phase !== 'coach') return; cv.phase = 'idle'; sfx.blip(); resolve(); };
+      const go = () => { if (cv.phase !== 'coach') return; cv.phase = 'idle'; voice.stop(); sfx.blip(); resolve(); };
       cv.cont = go;
       act.querySelector<HTMLButtonElement>('[data-a=cont]')!.onclick = go;
     });
@@ -551,7 +648,7 @@ export const ui = {
         <div class="eyebrow">${esc(o.eyebrow)}</div>
         <h2>${esc(o.title)}</h2>
         <div class="res-stars">${stars(0)}</div>
-        <p class="res-head"><b>${esc(o.headline)}</b> ${o.newBest ? '<span class="chip best">New best</span>' : ''}</p>
+        <p class="res-head"><b>${esc(o.headline)}</b> ${o.newBest ? '<span class="chip best">New best</span>' : ''}${listenBtn('Hear the results')}</p>
         <p class="muted">${esc(o.sub)}</p>
         <div class="stats">${o.stats.map(([v, l]) => `<div class="stat"><b class="mono">${esc(v)}</b><span>${esc(l)}</span></div>`).join('')}</div>
         ${o.notesHtml ?? ''}
@@ -564,7 +661,10 @@ export const ui = {
       for (let i = 0; i < o.stars; i++) {
         setTimeout(() => { starEls[i].classList.add('on', 'pop'); sfx.star(i); }, reduced ? 0 : 450 + i * 380);
       }
-      const done = (v: 'back' | 'retry') => { off(); m.close(); resolve(v); };
+      const summary = () => `${o.headline}. ${o.stars} of 3 stars. ${o.sub}`;
+      wireListen(m.box, () => void voice.say(summary(), 'mae', { force: true }));
+      if (voice.narrating()) void voice.say(summary(), 'mae', { queue: true });
+      const done = (v: 'back' | 'retry') => { off(); voice.stop(); m.close(); resolve(v); };
       m.box.querySelector<HTMLButtonElement>('[data-a=back]')!.onclick = () => done('back');
       m.box.querySelector<HTMLButtonElement>('[data-a=retry]')!.onclick = () => done('retry');
       const off = pushKeys((e) => {
@@ -578,6 +678,7 @@ export const ui = {
   convoClose() {
     const c = ui.convo;
     if (!c) return;
+    voice.stop();
     if (c.timer) clearTimeout(c.timer);
     c.typer?.skip();
     c.off();
@@ -600,7 +701,7 @@ export const ui = {
         <div class="pips">${Array.from({ length: total }, () => '<i></i>').join('')}</div>
         <button class="pbtn alt small" data-a="quit">Leave</button>
       </div>
-      <div class="sy-stage"><div class="sy-note"><span></span></div></div>
+      <div class="sy-stage"><div class="sy-note"><span></span>${listenBtn('Read this note aloud')}</div></div>
       <div class="sy-fb panel" hidden></div>
       <div class="sy-bins">${keys.map((k, i) => `<button class="bin" data-b="${k}"><kbd>${i + 1}</kbd><b>${BINS[k].n}</b><small>${BINS[k].d}</small></button>`).join('')}</div>
     </div>`);
@@ -631,6 +732,8 @@ export const ui = {
     const note = w.querySelector<HTMLElement>('.sy-note')!;
     note.querySelector('span')!.textContent = card.text;
     srEl.textContent = card.text;
+    wireListen(note, () => void voice.say(card.text, 'narrator', { force: true }));
+    if (voice.narrating()) void voice.say(card.text, 'narrator');
     const tilt = `${(Math.random() * 4 - 2).toFixed(1)}deg`;
     const stage = w.querySelector<HTMLElement>('.sy-stage')!;
     s.anim?.cancel();
@@ -658,11 +761,14 @@ export const ui = {
     const s = ui.synth!;
     const fb = s.wrap.querySelector<HTMLElement>('.sy-fb')!;
     fb.hidden = false;
-    fb.innerHTML = `<div class="coach-head"><span class="chip ${correct ? 'best' : 'bad'}">${correct ? '✓ Correct' : timedOut ? '✕ It hit the floor' : '✕ Not quite'}</span><span class="muted">It’s <b>${BINS[card.a].n}</b></span></div>
+    fb.innerHTML = `<div class="coach-head"><span class="chip ${correct ? 'best' : 'bad'}">${correct ? '✓ Correct' : timedOut ? '✕ It hit the floor' : '✕ Not quite'}</span><span class="muted">It’s <b>${BINS[card.a].n}</b></span>${listenBtn('Hear why')}</div>
       <p class="coach-note">${esc(card.why)}</p>
-      <div class="coach-foot"><span class="src">Source: ${srcLinks('u101')}</span><button class="pbtn" data-a="next">${last ? 'See results' : 'Next note'} <kbd>␣</kbd></button></div>`;
+      <div class="coach-foot"><span class="src">Source: ${srcLinks('u101')}</span><button class="pbtn" data-a="next">${last ? 'See results' : 'Next note'} <kbd>Space</kbd></button></div>`;
+    const why = () => `${correct ? 'Correct' : 'Not quite'}. It's ${BINS[card.a].n}. ${card.why}`;
+    wireListen(fb, () => void voice.say(why(), 'mae', { force: true }));
+    if (voice.narrating()) void voice.say(why(), 'mae');
     return new Promise((resolve) => {
-      const go = () => { s.cont = null; sfx.blip(); resolve(); };
+      const go = () => { s.cont = null; voice.stop(); sfx.blip(); resolve(); };
       s.cont = go;
       fb.querySelector<HTMLButtonElement>('[data-a=next]')!.onclick = go;
     });
@@ -671,6 +777,7 @@ export const ui = {
   synthClose() {
     const s = ui.synth;
     if (!s) return;
+    voice.stop();
     s.anim?.cancel();
     s.off();
     s.wrap.remove();

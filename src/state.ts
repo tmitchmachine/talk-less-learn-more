@@ -11,7 +11,7 @@ export interface Save {
   insights: string[];
   moves: string[];
   maeSeen: number;
-  settings: { timer: boolean; sound: boolean; music: boolean };
+  settings: { timer: boolean; sound: boolean; music: boolean; voice: boolean; narrate: boolean; voiceRate: number };
 }
 
 const blank = (): Save => ({
@@ -21,7 +21,7 @@ const blank = (): Save => ({
   insights: [],
   moves: [],
   maeSeen: -1,
-  settings: { timer: true, sound: true, music: true },
+  settings: { timer: true, sound: true, music: true, voice: true, narrate: false, voiceRate: 1 },
 });
 
 function load(): Save {

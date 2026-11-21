@@ -156,7 +156,7 @@ export function makeCharacter(scene: Phaser.Scene, id: string, look: Look) {
 /* Portraits: 48x48, one frame per mood plus a blink frame for each.   */
 /* ------------------------------------------------------------------ */
 
-function portraitRects(l: Look, mood: Mood, blink: boolean) {
+function portraitRects(l: Look, mood: Mood, blink: boolean, talk = false) {
   const r: Rect[] = [];
   const d: Rect[] = [];
   const sk = l.skin, hr = l.hair, sh = l.shirt, skD = shade(sk, 0.84);
@@ -178,6 +178,12 @@ function portraitRects(l: Look, mood: Mood, blink: boolean) {
     case 'cap': r.push([11, 5, 26, 7, cap], [8, 11, 32, 2, shade(cap, 0.72)], [10, 13, 3, 6, hr], [35, 13, 3, 6, hr]); d.push([22, 6, 4, 3, shade(cap, 1.3)]); break;
     case 'bald': r.push([10, 15, 3, 6, hr], [35, 15, 3, 6, hr]); d.push([17, 10, 6, 2, shade(sk, 1.18)]); break;
   }
+  // Soft form shading: light from the top left
+  d.push([14, 32, 20, 1, shade(sk, 0.8)], [34, 24, 1, 6, shade(sk, 0.93)]);
+  d.push([13, 17, 1, 5, shade(sk, 1.07)]);
+  if (l.style !== 'bald' && l.style !== 'cap') d.push([15, 7, 6, 1, shade(hr, l.hair === '#e4e1da' || l.hair === '#d8d8d8' ? 1.06 : 1.16)]);
+  if (l.style === 'cap') d.push([12, 6, 6, 1, shade(cap, 1.25)]);
+  d.push([5, 44, 38, 4, shade(sh, 0.84)], [11, 38, 9, 1, shade(sh, 1.18)], [6, 40, 2, 4, shade(sh, 1.12)]);
 
   // Eyes
   if (blink) {
@@ -200,10 +206,18 @@ function portraitRects(l: Look, mood: Mood, blink: boolean) {
   d.push([23, 23, 2, 4, skD]);
   // Mouth
   const M = '#6a2c2c';
-  if (mood === 'open') d.push([18, 27, 2, 1, M], [20, 28, 8, 2, M], [28, 27, 2, 1, M], [21, 28, 6, 1, '#f4f1ea'], [13, 25, 3, 2, shade('#e86a6a', 1)], [32, 25, 3, 2, '#e86a6a']);
-  if (mood === 'neutral') d.push([20, 28, 8, 2, M]);
-  if (mood === 'guarded') d.push([19, 29, 2, 1, M], [20, 28, 8, 1, M], [27, 29, 2, 1, M]);
-  if (mood === 'confused') d.push([19, 28, 3, 1, M], [22, 29, 3, 1, M], [25, 28, 3, 1, M], [28, 29, 2, 1, M]);
+  if (mood === 'open') d.push([13, 25, 3, 2, '#e86a6a'], [32, 25, 3, 2, '#e86a6a']);
+  if (talk) {
+    // Open mouth for lip sync, shaped a little by mood
+    const w = mood === 'guarded' ? 6 : 8, x = 24 - w / 2;
+    d.push([x, 27, w, 4, M], [x + 1, 27, w - 2, 1, '#f4f1ea'], [x + 2, 30, w - 4, 1, '#c25a5a']);
+    if (mood === 'open') d.push([x - 1, 27, 1, 1, M], [x + w, 27, 1, 1, M]);
+  } else {
+    if (mood === 'open') d.push([18, 27, 2, 1, M], [20, 28, 8, 2, M], [28, 27, 2, 1, M], [21, 28, 6, 1, '#f4f1ea']);
+    if (mood === 'neutral') d.push([20, 28, 8, 2, M]);
+    if (mood === 'guarded') d.push([19, 29, 2, 1, M], [20, 28, 8, 1, M], [27, 29, 2, 1, M]);
+    if (mood === 'confused') d.push([19, 28, 3, 1, M], [22, 29, 3, 1, M], [25, 28, 3, 1, M], [28, 29, 2, 1, M]);
+  }
   // Collar
   d.push([20, 37, 8, 2, shade(sh, 0.72)], [22, 39, 4, 1, shade(sh, 0.72)]);
   return { r, d };
@@ -213,22 +227,23 @@ export const PORTRAIT_URL: Record<string, string> = {};
 
 export function makePortrait(scene: Phaser.Scene, id: string, look: Look) {
   const key = `pt-${id}`;
-  canvasTex(scene, key, 48 * 8, 48, (ctx, t) => {
+  canvasTex(scene, key, 48 * 12, 48, (ctx, t) => {
     let i = 0;
     for (const m of MOODS) {
-      for (const blink of [false, true]) {
-        const { r, d } = portraitRects(look, m, blink);
+      for (const [suffix, blink, talk] of [['', false, false], ['-b', true, false], ['-t', false, true]] as const) {
+        const { r, d } = portraitRects(look, m, blink, talk);
         ctx.save();
         ctx.beginPath(); ctx.rect(i * 48, 0, 48, 48); ctx.clip();
         paint(ctx, i * 48, 0, r, d);
         ctx.restore();
-        t.add(blink ? `${m}-b` : m, 0, i * 48, 0, 48, 48);
+        t.add(`${m}${suffix}`, 0, i * 48, 0, 48, 48);
         i++;
       }
     }
   });
   PORTRAIT_URL[id] = scene.textures.getBase64(key, 'neutral') as string;
   PORTRAIT_URL[`${id}-open`] = scene.textures.getBase64(key, 'open') as string;
+  PORTRAIT_URL[`${id}-talk`] = scene.textures.getBase64(key, 'neutral-t') as string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -238,13 +253,39 @@ export function makePortrait(scene: Phaser.Scene, id: string, look: Look) {
 export const TILE = { grass: 0, grass2: 1, flowers: 2, path: 3, stone: 4, water: 5, tree: 6, market: 7, fence: 8, hedge: 9, water2: 10 } as const;
 export const SOLID_TILES = [TILE.water, TILE.tree, TILE.fence, TILE.hedge, TILE.water2];
 
+/** Shared palette, so the ground, trees and overlays all read as one place. */
+export const PAL = {
+  grass: '#6cb257', grassD: '#5a9c4b', grassDD: '#4a8641', grassL: '#86c76a', grassLL: '#a3d982',
+  path: '#dcb880', pathD: '#c49c63', pathDD: '#a98450', pathL: '#ead09d',
+  stone: '#cfc8b9', stoneD: '#aaa294', stoneL: '#e3ddd1',
+  water: '#4b9ee0', waterD: '#3a86cc', waterDD: '#2f72b4', waterL: '#8fcdf6', foam: '#e6f6ff',
+  leaf: '#3f9a4c', leafD: '#2c7a3d', leafDD: '#1f5c2f', leafL: '#5cb85a', leafLL: '#86d071', bark: '#7a4e2c', barkD: '#5a3820',
+  out: '#183824',
+};
+
 function grass(ctx: Ctx, ox: number, seed: number) {
   const rnd = mulberry32(seed);
-  ctx.fillStyle = '#5d9a4e'; ctx.fillRect(ox, 0, 16, 16);
-  for (let i = 0; i < 14; i++) {
-    ctx.fillStyle = rnd() < 0.6 ? '#4f8a43' : '#6dad5a';
-    ctx.fillRect(ox + Math.floor(rnd() * 16), Math.floor(rnd() * 15), 1, rnd() < 0.5 ? 2 : 1);
+  ctx.fillStyle = PAL.grass; ctx.fillRect(ox, 0, 16, 16);
+  for (let i = 0; i < 16; i++) {
+    const x = ox + Math.floor(rnd() * 16), y = 1 + Math.floor(rnd() * 14);
+    const r = rnd();
+    if (r < 0.5) { ctx.fillStyle = PAL.grassD; ctx.fillRect(x, y, 1, 2); }
+    else if (r < 0.8) { ctx.fillStyle = PAL.grassL; ctx.fillRect(x, y, 1, 1); }
+    else { ctx.fillStyle = PAL.grassD; ctx.fillRect(x, y, 1, 1); ctx.fillStyle = PAL.grassL; ctx.fillRect(x, y - 1, 1, 1); }
   }
+}
+
+function water(ctx: Ctx, ox: number, phase: number) {
+  ctx.fillStyle = PAL.water; ctx.fillRect(ox, 0, 16, 16);
+  ctx.fillStyle = PAL.waterD;
+  for (const [x, y, w] of [[1, 5, 5], [8, 11, 6], [3, 14, 4], [10, 2, 4]]) ctx.fillRect(ox + ((x + phase) % 16), y, Math.min(w, 16 - ((x + phase) % 16)), 1);
+  ctx.fillStyle = PAL.waterL;
+  for (const [x, y, w] of [[2, 3, 3], [9, 8, 4], [4, 12, 3]]) {
+    const xx = (x + phase * 2) % 16;
+    ctx.fillRect(ox + xx, y, Math.min(w, 16 - xx), 1);
+  }
+  ctx.fillStyle = PAL.foam;
+  ctx.fillRect(ox + ((12 + phase * 3) % 15), 6, 1, 1);
 }
 
 export function makeTiles(scene: Phaser.Scene) {
@@ -255,42 +296,287 @@ export function makeTiles(scene: Phaser.Scene) {
     grass(ctx, at(2), 5);
     const rnd = mulberry32(9);
     for (let i = 0; i < 5; i++) {
-      const x = at(2) + 1 + Math.floor(rnd() * 13), y = 1 + Math.floor(rnd() * 13);
-      const c = ['#f4f1ea', '#f6d865', '#ef8fb0', '#f4f1ea', '#a9c7ff'][i];
-      ctx.fillStyle = c; ctx.fillRect(x, y, 2, 1); ctx.fillRect(x, y - 1, 1, 1); ctx.fillRect(x + 1, y + 1, 1, 1);
-      ctx.fillStyle = '#f6c443'; ctx.fillRect(x, y, 1, 1);
+      const x = at(2) + 2 + Math.floor(rnd() * 12), y = 2 + Math.floor(rnd() * 12);
+      const c = ['#fff8ec', '#ffd84d', '#ff8fb8', '#fff8ec', '#9fc2ff'][i];
+      ctx.fillStyle = PAL.grassDD; ctx.fillRect(x, y + 1, 1, 2);
+      ctx.fillStyle = c; ctx.fillRect(x - 1, y, 3, 1); ctx.fillRect(x, y - 1, 1, 3);
+      ctx.fillStyle = '#f2b628'; ctx.fillRect(x, y, 1, 1);
     }
-    // path
-    ctx.fillStyle = '#c9a36b'; ctx.fillRect(at(3), 0, 16, 16);
+    // path: packed earth with pebbles
+    ctx.fillStyle = PAL.path; ctx.fillRect(at(3), 0, 16, 16);
     const r2 = mulberry32(21);
-    for (let i = 0; i < 12; i++) { ctx.fillStyle = r2() < 0.5 ? '#b48c58' : '#d8b77f'; ctx.fillRect(at(3) + Math.floor(r2() * 15), Math.floor(r2() * 15), 2, 1); }
-    // stone plaza
-    ctx.fillStyle = '#bdb6a8'; ctx.fillRect(at(4), 0, 16, 16);
-    ctx.fillStyle = '#a49d90'; ctx.fillRect(at(4), 7, 16, 1); ctx.fillRect(at(4), 15, 16, 1); ctx.fillRect(at(4) + 7, 0, 1, 7); ctx.fillRect(at(4) + 15, 8, 1, 7);
-    ctx.fillStyle = '#cfc9bc'; ctx.fillRect(at(4) + 1, 1, 3, 1); ctx.fillRect(at(4) + 9, 9, 3, 1);
-    // water x2
-    for (const [i, off] of [[5, 0], [10, 3]] as const) {
-      ctx.fillStyle = '#3f7fc4'; ctx.fillRect(at(i), 0, 16, 16);
-      ctx.fillStyle = '#6aa6e0';
-      ctx.fillRect(at(i) + ((2 + off) % 16), 3, 4, 1); ctx.fillRect(at(i) + ((9 + off) % 13), 8, 4, 1); ctx.fillRect(at(i) + ((4 + off) % 12), 13, 3, 1);
-      ctx.fillStyle = '#356fae'; ctx.fillRect(at(i) + ((11 + off) % 14), 4, 2, 1);
+    for (let i = 0; i < 14; i++) {
+      const x = at(3) + Math.floor(r2() * 15), y = Math.floor(r2() * 15), r = r2();
+      ctx.fillStyle = r < 0.45 ? PAL.pathD : r < 0.85 ? PAL.pathL : PAL.pathDD;
+      ctx.fillRect(x, y, r < 0.85 ? 2 : 1, 1);
     }
-    // tree on grass
+    // stone plaza: offset bricks with a bevel
+    ctx.fillStyle = PAL.stone; ctx.fillRect(at(4), 0, 16, 16);
+    for (const [bx, by, bw] of [[0, 0, 8], [8, 0, 8], [-4, 8, 8], [4, 8, 8], [12, 8, 8]] as const) {
+      const x0 = Math.max(0, bx), x1 = Math.min(16, bx + bw);
+      ctx.fillStyle = PAL.stoneL; ctx.fillRect(at(4) + x0, by, x1 - x0, 1);
+      if (bx >= 0) ctx.fillRect(at(4) + bx, by, 1, 7);
+      ctx.fillStyle = PAL.stoneD; ctx.fillRect(at(4) + x0, by + 7, x1 - x0, 1);
+      if (bx + bw <= 16) ctx.fillRect(at(4) + bx + bw - 1, by, 1, 8);
+    }
+    ctx.fillStyle = '#bdb5a6'; ctx.fillRect(at(4) + 3, 3, 2, 1); ctx.fillRect(at(4) + 10, 12, 2, 1);
+    // water x2 (animated by swapping)
+    water(ctx, at(5), 0);
+    water(ctx, at(10), 3);
+    // tree base: plain grass. The tree itself is a tall sprite so characters can walk behind it.
     grass(ctx, at(6), 3);
-    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(at(6) + 3, 13, 10, 2);
-    paint(ctx, at(6), 0, [[7, 10, 2, 4, '#6b4426'], [3, 2, 10, 8, '#2f6b3a'], [2, 4, 12, 5, '#2f6b3a'], [5, 1, 6, 1, '#2f6b3a']],
-      [[5, 3, 4, 2, '#3f8a4a'], [4, 5, 2, 2, '#3f8a4a'], [10, 7, 2, 2, '#255a2f'], [7, 10, 1, 4, '#573620']], '#173a20');
-    // market floor
-    ctx.fillStyle = '#dccaa2'; ctx.fillRect(at(7), 0, 16, 16);
-    ctx.fillStyle = '#cdb88e'; ctx.fillRect(at(7), 0, 8, 8); ctx.fillRect(at(7) + 8, 8, 8, 8);
+    // market floor: warm tiles with grout
+    ctx.fillStyle = '#e8d6ad'; ctx.fillRect(at(7), 0, 16, 16);
+    ctx.fillStyle = '#dcc595'; ctx.fillRect(at(7), 0, 8, 8); ctx.fillRect(at(7) + 8, 8, 8, 8);
+    ctx.fillStyle = '#c8ae7c'; ctx.fillRect(at(7), 7, 16, 1); ctx.fillRect(at(7), 15, 16, 1); ctx.fillRect(at(7) + 7, 0, 1, 16); ctx.fillRect(at(7) + 15, 0, 1, 16);
+    ctx.fillStyle = '#f3e4c2'; ctx.fillRect(at(7), 0, 7, 1); ctx.fillRect(at(7) + 8, 8, 7, 1);
     // fence (clipped so its outline can't bleed into the next tile)
     grass(ctx, at(8), 3);
     ctx.save(); ctx.beginPath(); ctx.rect(at(8), 0, 16, 16); ctx.clip();
-    paint(ctx, at(8), 0,[[0, 6, 16, 2, '#9a6a3c'], [0, 10, 16, 2, '#9a6a3c'], [2, 4, 2, 10, '#8a5a32'], [12, 4, 2, 10, '#8a5a32']], [], '#3b2414');
+    ctx.fillStyle = 'rgba(20,40,20,.25)'; ctx.fillRect(at(8), 13, 16, 2);
+    paint(ctx, at(8), 0, [[0, 6, 16, 2, '#b07a46'], [0, 10, 16, 2, '#b07a46'], [2, 3, 3, 11, '#9a6638'], [11, 3, 3, 11, '#9a6638']],
+      [[0, 6, 16, 1, '#c99460'], [2, 3, 1, 11, '#b8834e'], [11, 3, 1, 11, '#b8834e']], '#3b2414');
     ctx.restore();
-    // hedge
-    grass(ctx, at(9), 11);
-    paint(ctx, at(9), 0, [[1, 3, 14, 12, '#3d7a3a'], [2, 2, 12, 1, '#3d7a3a']], [[3, 4, 3, 2, '#4f9449'], [9, 6, 3, 2, '#4f9449'], [5, 10, 3, 2, '#326632'], [11, 11, 2, 2, '#326632']], '#173a20');
+    // hedge: a seamless leafy block. Its outline and front face are added per edge in makeGroundDetail.
+    ctx.fillStyle = PAL.leaf; ctx.fillRect(at(9), 0, 16, 16);
+    const r3 = mulberry32(33);
+    for (let i = 0; i < 9; i++) {
+      const x = at(9) + Math.floor(r3() * 14), y = Math.floor(r3() * 14);
+      ctx.fillStyle = PAL.leafD; ctx.fillRect(x + 1, y + 1, 2, 2);
+      ctx.fillStyle = PAL.leafL; ctx.fillRect(x, y, 2, 1);
+      ctx.fillStyle = PAL.leafLL; ctx.fillRect(x, y, 1, 1);
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Trees: tall sprites, y-sorted with everything else.                  */
+/* ------------------------------------------------------------------ */
+
+function disc(ctx: Ctx, cx: number, cy: number, r: number, c: string) {
+  ctx.fillStyle = c;
+  for (let y = -r; y <= r; y++) {
+    const w = Math.round(Math.sqrt(r * r - y * y) * 1.0);
+    ctx.fillRect(cx - w, cy + y, w * 2 + 1, 1);
+  }
+}
+
+export const TREE_KINDS = ['tree-a', 'tree-b', 'tree-c', 'tree-d'] as const;
+
+export function makeTrees(scene: Phaser.Scene) {
+  const leafy = (key: string, cols: [string, string, string, string, string], seed: number) =>
+    canvasTex(scene, key, 32, 38, (ctx) => {
+      const [dd, d, m, l, ll] = cols;
+      const rnd = mulberry32(seed);
+      const lumps: [number, number, number][] = [[16, 15, 12], [8, 19, 8], [24, 19, 8], [12, 8, 8], [21, 9, 7]];
+      // trunk
+      paint(ctx, 0, 0, [[13, 26, 6, 11, PAL.bark], [11, 35, 10, 2, PAL.bark]], [[13, 26, 2, 11, '#946238'], [17, 28, 2, 9, PAL.barkD]], '#2a1a10');
+      // outline, then dark, mid and light layers offset toward the sun (top left)
+      for (const [x, y, r] of lumps) disc(ctx, x, y, r + 1, PAL.out);
+      for (const [x, y, r] of lumps) disc(ctx, x, y, r, dd);
+      for (const [x, y, r] of lumps) disc(ctx, x - 1, y - 1, r - 1, d);
+      for (const [x, y, r] of lumps) disc(ctx, x - 2, y - 2, Math.max(1, r - 3), m);
+      for (const [x, y, r] of lumps.slice(0, 4)) disc(ctx, x - 3, y - 4, Math.max(1, r - 6), l);
+      // leaf speckles
+      for (let i = 0; i < 26; i++) {
+        const a = rnd() * Math.PI * 2, rr = rnd() * 11;
+        const x = Math.round(15 + Math.cos(a) * rr), y = Math.round(13 + Math.sin(a) * rr * 0.9);
+        ctx.fillStyle = y < 13 ? ll : d;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    });
+  leafy('tree-a', [PAL.leafDD, PAL.leafD, PAL.leaf, PAL.leafL, PAL.leafLL], 4);
+  leafy('tree-b', ['#1d5236', '#24684a', '#2f8058', '#43a06a', '#6cc08a'], 8);
+  leafy('tree-c', ['#7a3150', '#a8486c', '#d46b92', '#ef94b4', '#ffc4d8'], 12);
+  // A tiered pine
+  canvasTex(scene, 'tree-d', 32, 38, (ctx) => {
+    paint(ctx, 0, 0, [[14, 29, 4, 8, PAL.bark]], [[14, 29, 1, 8, '#946238']], '#2a1a10');
+    const tiers: [number, number, number][] = [[30, 14, 0], [22, 11, 0], [14, 8, 0], [7, 5, 0]];
+    const tri = (base: number, half: number, c: string, dx = 0) => {
+      for (let y = 0; y < 10; y++) {
+        const w = Math.round((half * (y + 1)) / 10);
+        ctx.fillStyle = c; ctx.fillRect(16 - w + dx, base - 10 + y, w * 2, 1);
+      }
+    };
+    for (const [b, h] of tiers) tri(b + 1, h + 1, PAL.out);
+    for (const [b, h] of tiers) tri(b, h, '#1f5a3a');
+    for (const [b, h] of tiers) tri(b - 1, h - 3, '#2b7449', -1);
+    for (const [b, h] of tiers) tri(b - 3, Math.max(2, h - 7), '#3f915c', -2);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Soft light and shadow textures (smooth-filtered).                    */
+/* ------------------------------------------------------------------ */
+
+function smoothTex(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: Ctx) => void) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const t = scene.textures.createCanvas(key, w, h)!;
+  const ctx = t.getContext();
+  draw(ctx);
+  t.refresh();
+  t.setFilter(Phaser.Textures.FilterMode.LINEAR);
+  return t;
+}
+
+function radial(ctx: Ctx, x: number, y: number, r: number, stops: [number, string][]) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  for (const [o, c] of stops) g.addColorStop(o, c);
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+export function makeFx(scene: Phaser.Scene) {
+  // Soft contact shadow (an ellipse made by squashing a radial gradient)
+  smoothTex(scene, 'softshadow', 64, 64, (ctx) => radial(ctx, 32, 32, 32, [[0, 'rgba(14,22,30,.9)'], [0.55, 'rgba(14,22,30,.55)'], [1, 'rgba(14,22,30,0)']]));
+  smoothTex(scene, 'glow', 64, 64, (ctx) => radial(ctx, 32, 32, 32, [[0, 'rgba(255,255,255,1)'], [0.35, 'rgba(255,255,255,.45)'], [1, 'rgba(255,255,255,0)']]));
+  smoothTex(scene, 'mote', 16, 16, (ctx) => radial(ctx, 8, 8, 8, [[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,.6)'], [1, 'rgba(255,255,255,0)']]));
+  // Tileable drifting cloud shadows: white is "no shadow" under a multiply blend.
+  smoothTex(scene, 'clouds', 256, 256, (ctx) => {
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+    const rnd = mulberry32(77);
+    for (let i = 0; i < 7; i++) {
+      const cx = rnd() * 256, cy = rnd() * 256, r = 40 + rnd() * 50;
+      for (let k = 0; k < 4; k++) {
+        const ox = cx + (rnd() - 0.5) * r, oy = cy + (rnd() - 0.5) * r * 0.6, rr = r * (0.5 + rnd() * 0.4);
+        for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) radial(ctx, ox + dx, oy + dy, rr, [[0, 'rgba(70,90,130,.22)'], [1, 'rgba(70,90,130,0)']]);
+      }
+    }
+  });
+  // Butterfly: two wing frames
+  canvasTex(scene, 'butterfly', 14, 6, (ctx, t) => {
+    for (const [i, c] of [[0, '#ffd84d'], [1, '#ffd84d']] as const) {
+      const ox = i * 7;
+      ctx.fillStyle = '#3a2a1a'; ctx.fillRect(ox + 3, 1, 1, 4);
+      ctx.fillStyle = c;
+      if (i === 0) { ctx.fillRect(ox, 0, 3, 3); ctx.fillRect(ox + 4, 0, 3, 3); ctx.fillRect(ox + 1, 3, 2, 2); ctx.fillRect(ox + 4, 3, 2, 2); }
+      else { ctx.fillRect(ox + 2, 1, 1, 3); ctx.fillRect(ox + 4, 1, 1, 3); }
+      t.add(String(i), 0, ox, 0, 7, 6);
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Ground detail: grass fringes, shores, tufts and soft light patches,  */
+/* drawn once over the whole map so tile seams disappear.               */
+/* ------------------------------------------------------------------ */
+
+export function makeGroundDetail(scene: Phaser.Scene, tiles: number[][], T: number) {
+  const H = tiles.length, W = tiles[0].length;
+  const isGrass = (v: number) => v === TILE.grass || v === TILE.grass2 || v === TILE.flowers || v === TILE.tree || v === TILE.hedge || v === TILE.fence;
+  const isWater = (v: number) => v === TILE.water || v === TILE.water2;
+  const isGround = (v: number) => v === TILE.path || v === TILE.stone || v === TILE.market;
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < H ? tiles[y][x] : TILE.tree);
+
+  canvasTex(scene, 'ground-fx', W * T, H * T, (ctx) => {
+    const rnd = mulberry32(1234);
+
+    // Large soft light and shade patches across the grass break up the tile grid.
+    ctx.save();
+    ctx.beginPath();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (isGrass(tiles[y][x])) ctx.rect(x * T, y * T, T, T);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    for (let i = 0; i < 70; i++) {
+      const x = rnd() * W * T, y = rnd() * H * T, r = 24 + rnd() * 48;
+      const light = rnd() < 0.55;
+      radial(ctx, x, y, r, [[0, light ? 'rgba(255,250,190,.10)' : 'rgba(20,70,30,.12)'], [1, 'rgba(0,0,0,0)']]);
+    }
+    ctx.restore();
+    ctx.imageSmoothingEnabled = false;
+
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const v = tiles[y][x];
+      const ox = x * T, oy = y * T;
+
+      if (isGround(v)) {
+        // Grass creeps over the edges of paths and plazas, with a little shadow under it.
+        const edges: [number, number, (i: number, d: number) => [number, number]][] = [
+          [0, -1, (i, d) => [ox + i, oy + d]],
+          [0, 1, (i, d) => [ox + i, oy + T - 1 - d]],
+          [-1, 0, (i, d) => [ox + d, oy + i]],
+          [1, 0, (i, d) => [ox + T - 1 - d, oy + i]],
+        ];
+        for (const [dx, dy, pos] of edges) {
+          if (!isGrass(at(x + dx, y + dy))) continue;
+          for (let i = 0; i < T; i++) {
+            const depth = 1 + (rnd() < 0.55 ? 1 : 0) + (rnd() < 0.18 ? 1 : 0);
+            for (let d = 0; d < depth; d++) {
+              const [px, py] = pos(i, d);
+              ctx.fillStyle = d === depth - 1 ? PAL.grassD : PAL.grass;
+              ctx.fillRect(px, py, 1, 1);
+            }
+            const [sx, sy] = pos(i, depth);
+            ctx.fillStyle = 'rgba(60,40,20,.16)';
+            ctx.fillRect(sx, sy, 1, 1);
+          }
+        }
+      }
+
+      if (isWater(v)) {
+        // Shoreline: a dark lip under the bank, then a broken line of foam.
+        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+          if (isWater(at(x + dx, y + dy))) continue;
+          for (let i = 0; i < T; i++) {
+            const px = dx === 0 ? ox + i : dx < 0 ? ox : ox + T - 1;
+            const py = dy === 0 ? oy + i : dy < 0 ? oy : oy + T - 1;
+            const ix = dx === 0 ? 0 : -dx, iy = dy === 0 ? 0 : -dy;
+            ctx.fillStyle = PAL.waterDD; ctx.fillRect(px, py, 1, 1);
+            ctx.fillStyle = 'rgba(47,114,180,.6)'; ctx.fillRect(px + ix, py + iy, 1, 1);
+            if (rnd() < 0.6) { ctx.fillStyle = 'rgba(230,246,255,.75)'; ctx.fillRect(px + ix * 2, py + iy * 2, 1, 1); }
+          }
+        }
+      }
+
+      if (v === TILE.hedge) {
+        // Hedges join into one long shape: outline only where they meet something else,
+        // a lit top edge, and a darker front face with a shadow on the ground below.
+        const open = (dx: number, dy: number) => at(x + dx, y + dy) !== TILE.hedge;
+        if (open(0, -1)) { ctx.fillStyle = PAL.out; ctx.fillRect(ox, oy, T, 1); ctx.fillStyle = PAL.leafL; ctx.fillRect(ox, oy + 1, T, 1); ctx.fillStyle = PAL.leafLL; for (let i = 1; i < T; i += 3) ctx.fillRect(ox + i, oy + 1, 1, 1); }
+        if (open(-1, 0)) { ctx.fillStyle = PAL.out; ctx.fillRect(ox, oy, 1, T); ctx.fillStyle = PAL.leafL; ctx.fillRect(ox + 1, oy + 1, 1, T - 2); }
+        if (open(1, 0)) { ctx.fillStyle = PAL.out; ctx.fillRect(ox + T - 1, oy, 1, T); ctx.fillStyle = PAL.leafD; ctx.fillRect(ox + T - 2, oy + 1, 1, T - 2); }
+        if (open(0, 1)) {
+          ctx.fillStyle = PAL.leafD; ctx.fillRect(ox, oy + T - 5, T, 4);
+          ctx.fillStyle = PAL.leafDD; ctx.fillRect(ox, oy + T - 2, T, 1);
+          for (let i = 0; i < T; i += 2) { ctx.fillStyle = PAL.leaf; ctx.fillRect(ox + i, oy + T - 5, 1, 1); }
+          ctx.fillStyle = PAL.out; ctx.fillRect(ox, oy + T - 1, T, 1);
+          if (y + 1 < H) { ctx.fillStyle = 'rgba(16,40,20,.3)'; ctx.fillRect(ox, oy + T, T, 2); ctx.fillStyle = 'rgba(16,40,20,.15)'; ctx.fillRect(ox, oy + T + 2, T, 1); }
+        }
+        // Round off exposed corners
+        for (const [cx, cy, dx, dy] of [[0, 0, -1, -1], [T - 1, 0, 1, -1], [0, T - 1, -1, 1], [T - 1, T - 1, 1, 1]] as const) {
+          if (open(dx, 0) && open(0, dy)) { ctx.fillStyle = PAL.grass; ctx.fillRect(ox + cx, oy + cy, 1, 1); }
+        }
+      }
+
+      if (isGrass(v) && v !== TILE.hedge && v !== TILE.fence) {
+        // Bank shading where grass meets water
+        for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1]] as const) {
+          if (!isWater(at(x + dx, y + dy))) continue;
+          for (let i = 0; i < T; i++) {
+            const px = dx === 0 ? ox + i : dx > 0 ? ox + T - 1 : ox;
+            const py = dy === 0 ? oy + i : dy > 0 ? oy + T - 1 : oy;
+            ctx.fillStyle = PAL.grassDD; ctx.fillRect(px, py, 1, 1);
+          }
+        }
+        // Tufts, tiny flowers and pebbles
+        const n = 1 + Math.floor(rnd() * 3);
+        for (let k = 0; k < n; k++) {
+          const px = ox + 1 + Math.floor(rnd() * (T - 3)), py = oy + 2 + Math.floor(rnd() * (T - 4));
+          const r = rnd();
+          if (r < 0.62) {
+            ctx.fillStyle = PAL.grassDD; ctx.fillRect(px, py + 1, 3, 1);
+            ctx.fillStyle = PAL.grassD; ctx.fillRect(px, py, 1, 1); ctx.fillRect(px + 2, py, 1, 1);
+            ctx.fillStyle = PAL.grassLL; ctx.fillRect(px + 1, py - 1, 1, 2);
+          } else if (r < 0.74) {
+            ctx.fillStyle = ['#fff8ec', '#ffd84d', '#cfe0ff'][Math.floor(rnd() * 3)];
+            ctx.fillRect(px, py, 1, 1);
+          } else if (r < 0.8) {
+            ctx.fillStyle = '#b9b2a2'; ctx.fillRect(px, py, 2, 1);
+            ctx.fillStyle = '#e1dccf'; ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+    }
   });
 }
 

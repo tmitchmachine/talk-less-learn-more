@@ -16,6 +16,8 @@ All the lessons in the game come from [Nielsen Norman Group](https://www.nngroup
 - **Sort the wall.** In the lab, sort falling observations into the five quality components of usability (learnability, efficiency, memorability, errors, satisfaction), plus utility.
 - **Collect moves.** Strong techniques you use (Echo, Boomerang, Columbo, the funnel, and others) go into your journal, with links to the source articles.
 
+- **Hear every line.** Characters speak their lines out loud, each with their own voice, and their portraits lip-sync. Press the speaker button (or L) to hear a line again. In Settings you can turn voices off, change their speed, or turn on “Read everything aloud” to also hear scene notes, your own lines, coaching tips and results.
+
 Progress saves in your browser's local storage.
 
 ## Sources
@@ -43,9 +45,10 @@ npm run preview    # serve the production build
 
 Built with [Phaser 3](https://phaser.io), TypeScript and Vite. There are no image or audio files:
 
-- Every sprite, tile, building and portrait is drawn in code (`src/art/draw.ts`).
+- Every sprite, tile, tree, building and portrait is drawn in code (`src/art/draw.ts`), along with the soft light, shadow and cloud textures.
 - The sound effects and music are synthesized with the Web Audio API (`src/audio.ts`).
-- The dialogue and menus are an HTML layer over the canvas (`src/ui/`), so text stays sharp and every control works with keyboard, mouse, touch and screen readers.
+- Spoken dialogue uses the browser's built-in speech engine (`src/voice.ts`). Each character gets a voice from the ones the device offers, plus their own pitch and pace. The music dips while someone is talking.
+- The dialogue and menus are an HTML layer over the canvas (`src/ui/`), so text stays sharp and every control works with keyboard, mouse, touch and screen readers. Text is set in [Atkinson Hyperlegible Next](https://www.brailleinstitute.org/freefont/), a typeface designed for legibility, with headings in [Outfit](https://fonts.google.com/specimen/Outfit).
 
 | Path | What’s there |
 |---|---|

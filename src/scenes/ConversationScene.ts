@@ -4,6 +4,7 @@ import type { Emote, Mood } from '../art/draw';
 import { learnMove, recordSession, state } from '../state';
 import { esc, ui } from '../ui/ui';
 import { sfx } from '../audio';
+import { voice } from '../voice';
 
 const OPEN_DELTA = { best: 10, ok: 0, bad: -15 } as const;
 const MOOD_EMOTE: Record<Mood, Emote> = { open: 'heart', neutral: 'dots', guarded: 'sweat', confused: 'q' };
@@ -45,6 +46,10 @@ export class ConversationScene extends Phaser.Scene {
   private baseY = 0;
   private jorBaseY = 0;
   private ps = 4;
+  private light!: Phaser.GameObjects.Graphics;
+  private spot!: Phaser.GameObjects.Image;
+  private motes!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private blinking = false;
 
   constructor() { super('Conversation'); }
 
@@ -54,17 +59,27 @@ export class ConversationScene extends Phaser.Scene {
     this.ti = 0; this.open = 60; this.ins = 0; this.bias = 0; this.you = 0; this.them = 0; this.streak = 0;
     this.found = []; this.mood = 'neutral'; this.alive = true; this.jor = undefined;
 
+    document.body.dataset.scene = 'convo';
     this.cameras.main.setBackgroundColor('#141826');
     this.bg = this.add.graphics();
+    // A gentle depth-of-field: the room softens so the person you're talking to stands out.
+    this.bg.postFX?.addBlur(0, 1, 1, 0.9);
+    this.spot = this.add.image(0, 0, 'glow').setTint(0xffe6b0).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.28);
     if (this.s.observer) this.jor = this.add.sprite(0, 0, 'pt-jordan', 'neutral').setOrigin(0.5, 1).setAlpha(0.5);
     this.por = this.add.sprite(0, 0, `pt-${this.s.id}`, 'neutral').setOrigin(0.5, 1);
     this.fg = this.add.graphics();
+    this.light = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
+    this.motes = this.add.particles(0, 0, 'mote', {
+      lifespan: { min: 4000, max: 7000 }, speedX: { min: -6, max: 6 }, speedY: { min: -4, max: 8 },
+      scale: { min: 0.15, max: 0.4 }, alpha: { values: [0, 0.6, 0], interpolation: 'linear' },
+      tint: 0xfff2cc, blendMode: Phaser.BlendModes.ADD, frequency: 140, maxAliveParticles: 40,
+    });
     this.rec = this.add.rectangle(0, 0, 4, 4, 0xff5a4e).setOrigin(0, 0);
     this.emote = this.add.sprite(0, 0, 'emotes', 'dots').setVisible(false);
     this.layout();
 
     this.scale.on('resize', this.layout, this);
-    this.events.once('shutdown', () => { this.scale.off('resize', this.layout, this); this.alive = false; });
+    this.events.once('shutdown', () => { this.scale.off('resize', this.layout, this); this.alive = false; voice.stop(); });
     this.time.addEvent({ delay: 2900, loop: true, callback: () => this.blink() });
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.rec.setVisible(!this.rec.visible) });
     this.cameras.main.fadeIn(350);
@@ -78,6 +93,11 @@ export class ConversationScene extends Phaser.Scene {
     const bob = Math.sin(time / 650) > 0 ? 0 : this.ps;
     this.por.y = this.baseY + bob;
     if (this.jor) this.jor.y = this.jorBaseY;
+    // Lip sync: flap the mouth while this character's voice is playing.
+    const who = voice.current();
+    const flap = Math.floor(time / 130) % 3 !== 2;
+    if (!this.blinking) this.por.setFrame(who === this.s.id && flap ? `${this.mood}-t` : this.mood);
+    if (this.jor) this.jor.setFrame(who === 'jordan' && flap ? 'neutral-t' : 'neutral');
   }
 
   /* ---------------- scene art ---------------- */
@@ -87,13 +107,14 @@ export class ConversationScene extends Phaser.Scene {
     const narrow = w < 720;
     const u = Math.max(2, Math.floor(Math.min(w / 240, h / 140)));
     // The dialogue panel covers roughly the bottom half, so the customer sits above it.
-    const hy = Math.round(h * (narrow ? 0.43 : 0.5));
+    const hy = Math.round(h * (narrow ? 0.4 : 0.46));
     const top = narrow ? 120 : 84;
     this.ps = Phaser.Math.Clamp(Math.floor(Math.min(hy - top, w * (narrow ? 0.6 : 0.4)) / 46), 2, 10);
     const px = Math.round(narrow ? w * 0.5 : w * 0.34);
     const spots = this.drawRoom(w, h, hy, u, px, top);
     this.baseY = hy + 4 * u;
     this.por.setScale(this.ps).setPosition(px, this.baseY);
+    this.spot.setPosition(px, this.baseY - 26 * this.ps).setDisplaySize(110 * this.ps, 90 * this.ps);
     this.rec.setPosition(spots.rec.x, spots.rec.y).setSize(spots.rec.s, spots.rec.s);
     if (this.jor) {
       const js = Math.max(1, Math.floor(spots.win.h / 52));
@@ -109,11 +130,15 @@ export class ConversationScene extends Phaser.Scene {
     const P = ROOMS[this.s.room];
     const bg = this.bg.clear();
     const fg = this.fg.clear();
+    const light = this.light.clear();
     bg.fillStyle(P.wall).fillRect(0, 0, w, hy);
     for (let x = Math.round((w / 2) % (28 * u)); x < w; x += 28 * u) bg.fillStyle(P.wall2).fillRect(x, 0, 2 * u, hy);
+    // Ceiling shade fading down the wall
+    bg.fillGradientStyle(0x0b0d18, 0x0b0d18, 0x0b0d18, 0x0b0d18, 0.45, 0.45, 0, 0).fillRect(0, 0, w, hy * 0.6);
     bg.fillStyle(P.trim).fillRect(0, hy - 4 * u, w, 4 * u);
     bg.fillStyle(P.floor).fillRect(0, hy, w, h - hy);
     for (let y = hy + 8 * u; y < h; y += 10 * u) bg.fillStyle(P.floor2).fillRect(0, y, w, u);
+    bg.fillGradientStyle(0x000000, 0x000000, 0x0b0d18, 0x0b0d18, 0.25, 0.25, 0.6, 0.6).fillRect(0, hy, w, h - hy);
 
     // Window (or the one-way mirror in the bank)
     const wy = Math.round(Math.max(hy * 0.18, top));
@@ -137,6 +162,17 @@ export class ConversationScene extends Phaser.Scene {
       bg.fillStyle(0x6dad5a).fillRect(wx, wy + wh - 9 * u, ww, 9 * u);
       bg.fillStyle(P.frame).fillRect(wx + ww / 2 - u, wy, 2 * u, wh).fillRect(wx, wy + wh / 2 - u, ww, 2 * u);
     }
+    // Sunlight falling from the window across the room (the bank's one-way mirror stays dark)
+    if (this.s.room !== 'bank') {
+      const c = this.s.room === 'truck' ? 0xffd8a0 : 0xe8f4ff;
+      const x0 = wx, x1 = wx + ww, yb = h, spread = w * 0.22;
+      light.fillGradientStyle(c, c, c, c, 0.16, 0.16, 0, 0);
+      light.fillTriangle(x0, wy + wh, x1, wy + wh, x0 - spread, yb);
+      light.fillTriangle(x1, wy + wh, x1 - spread, yb, x0 - spread, yb);
+      light.fillStyle(c, 0.08).fillRect(wx, wy, ww, wh);
+    }
+    this.motes.clearEmitZones();
+    this.motes.addEmitZone({ type: 'random', source: new Phaser.Geom.Rectangle(wx - w * 0.15, wy, ww + w * 0.1, h - wy) as unknown as Phaser.Types.GameObjects.Particles.RandomZoneSource });
 
     // Affinity wall of sticky notes: every research room has one
     const ax = Math.round(w * 0.05), ay = Math.round(Math.max(hy * 0.2, top + 4));
@@ -154,7 +190,9 @@ export class ConversationScene extends Phaser.Scene {
     fg.fillStyle(0x3e2615).fillRect(tx + 6 * u, ty + 10 * u, 4 * u, h).fillRect(tx + tw - 10 * u, ty + 10 * u, 4 * u, h);
     fg.fillStyle(0x4a2e1a).fillRect(tx, ty + 4 * u, tw, 7 * u);
     fg.fillStyle(0x7a4b2a).fillRect(tx, ty, tw, 5 * u);
-    fg.fillStyle(0x8f5b33).fillRect(tx, ty, tw, u);
+    fg.fillStyle(0x9a6a3e).fillRect(tx, ty, tw, u);
+    fg.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0, 0, 0.35, 0.35).fillRect(tx, ty + u, tw, 4 * u);
+    fg.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0.4, 0.4, 0, 0).fillRect(tx, ty + 11 * u, tw, 10 * u);
 
     // Objects on the table
     const ix = Math.round(px - (w < 720 ? 34 : 48) * u);
@@ -184,8 +222,9 @@ export class ConversationScene extends Phaser.Scene {
 
   private blink() {
     if (!this.alive) return;
+    this.blinking = true;
     this.por.setFrame(`${this.mood}-b`);
-    this.time.delayedCall(130, () => this.alive && this.por.setFrame(this.mood));
+    this.time.delayedCall(130, () => { this.blinking = false; });
   }
 
   private setMood(m: Mood) {
@@ -234,6 +273,8 @@ export class ConversationScene extends Phaser.Scene {
     ui.convoMeters({ open: this.open, ins: this.ins, mx: maxIns(this.s), bias: this.bias, streak: this.streak, t: tu.t });
   }
 
+  private voiceId(who: 'p' | 'obs') { return who === 'obs' ? (this.s.observer ?? 'jordan').toLowerCase() : this.s.id; }
+
   private wait(ms: number) { return new Promise<void>((r) => this.time.delayedCall(ms, r)); }
 
   /* ---------------- the session loop ---------------- */
@@ -244,7 +285,7 @@ export class ConversationScene extends Phaser.Scene {
     this.meters();
     if (tu.who === 'obs') this.jordanPing();
     if (tu.who === 'p' && tu.line) this.them += wc(tu.line);
-    await ui.convoLine({ ctx: tu.ctx, speaker: tu.who === 'obs' ? this.s.observer! : this.s.name, kind: tu.who, text: tu.line });
+    await ui.convoLine({ ctx: tu.ctx, speaker: tu.who === 'obs' ? this.s.observer! : this.s.name, voiceId: this.voiceId(tu.who), mood: this.mood, kind: tu.who, text: tu.line });
     if (!this.alive) return;
     const order = shuffle(tu.choices.length);
     const toWhom = tu.who === 'obs' ? `Reply to ${this.s.observer}` : `What do you say to ${this.s.name}?`;
@@ -274,7 +315,7 @@ export class ConversationScene extends Phaser.Scene {
 
     await ui.convoReply({
       you: c.say, silent: c.silent, toObs: tu.who === 'obs' && !c.rwho,
-      speaker: rwho === 'obs' ? this.s.observer! : this.s.name, kind: rwho, text: c.reply,
+      speaker: rwho === 'obs' ? this.s.observer! : this.s.name, voiceId: this.voiceId(rwho), mood: this.mood, kind: rwho, text: c.reply,
     });
     if (!this.alive) return;
     const left = this.open <= 0;
@@ -290,7 +331,7 @@ export class ConversationScene extends Phaser.Scene {
   private async leave() {
     this.setMood('guarded');
     sfx.fail();
-    await ui.convoLine({ speaker: this.s.name, kind: 'p', text: this.s.leave });
+    await ui.convoLine({ speaker: this.s.name, voiceId: this.s.id, mood: 'guarded', kind: 'p', text: this.s.leave });
     if (!this.alive) return;
     this.tweens.add({ targets: this.por, alpha: 0, x: this.por.x + 60, duration: 700 });
     await this.wait(1000);
@@ -331,6 +372,7 @@ export class ConversationScene extends Phaser.Scene {
   }
 
   private exit() {
+    voice.stop();
     ui.convoClose();
     this.alive = false;
     this.scene.resume('Town', { from: 'session' });

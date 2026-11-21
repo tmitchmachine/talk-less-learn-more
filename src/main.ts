@@ -1,10 +1,7 @@
 import Phaser from 'phaser';
-import '@fontsource/pixelify-sans/400.css';
-import '@fontsource/pixelify-sans/600.css';
-import '@fontsource/pixelify-sans/700.css';
-import '@fontsource/atkinson-hyperlegible/400.css';
-import '@fontsource/atkinson-hyperlegible/400-italic.css';
-import '@fontsource/atkinson-hyperlegible/700.css';
+import '@fontsource-variable/outfit';
+import '@fontsource-variable/atkinson-hyperlegible-next/wght.css';
+import '@fontsource-variable/atkinson-hyperlegible-next/wght-italic.css';
 import './ui/style.css';
 import { BootScene } from './scenes/BootScene';
 import { TownScene } from './scenes/TownScene';

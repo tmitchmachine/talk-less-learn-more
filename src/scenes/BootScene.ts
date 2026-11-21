@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { makeBuildings, makeCharacter, makeEmotes, makePortrait, makeTiles } from '../art/draw';
+import { makeBuildings, makeCharacter, makeEmotes, makeFx, makePortrait, makeTiles, makeTrees } from '../art/draw';
 import { CAST } from '../data/cast';
 
 /** Draws every texture in code, then hands off to the town. */
@@ -8,6 +8,8 @@ export class BootScene extends Phaser.Scene {
 
   create() {
     makeTiles(this);
+    makeTrees(this);
+    makeFx(this);
     makeBuildings(this);
     makeEmotes(this);
     for (const [id, c] of Object.entries(CAST)) {
