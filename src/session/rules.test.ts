@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { debriefClaims, sessionScore, sessionStars } from './rules';
 import { STEPS } from '../data/steps';
 import { SESSIONS } from '../data/sessions';
-import { currentStep, migrate, open, progress, rankThresholds, state } from '../state';
+import { applySave, currentStep, exportSaveCode, migrate, open, parseSaveCode, progress, rankThresholds, state } from '../state';
 
 describe('progress helpers via migrate and STEPS', () => {
   it('STEPS holds every SESSIONS id once, in order, plus wall', () => {
@@ -97,6 +97,67 @@ describe('mustFind gate', () => {
   it('sessionScore clamps insight minus half bias', () => {
     expect(sessionScore(100, 20, 100, false)).toBe(0.9);
     expect(sessionScore(10, 0, 100, true)).toBe(0);
+  });
+});
+
+describe('portable save codes', () => {
+  it('round-trips progress through export and parse', () => {
+    const sample = migrate({
+      v: 2,
+      started: true,
+      sessions: { kickoff: { stars: 2, best: 0.8, plays: 1 }, len: { stars: 1, best: 0.4, plays: 2 } },
+      synth: { stars: 0, best: 0, plays: 0, done: false },
+      insights: ['l1'],
+      moves: ['echo'],
+      readings: { len: ['len-1'] },
+      maeSeen: 'len',
+      settings: { timer: false, sound: true, music: false, voice: true, narrate: true, voiceRate: 1.1 },
+    });
+    const code = exportSaveCode(sample);
+    expect(code.startsWith('TLLM2.')).toBe(true);
+    const parsed = parseSaveCode(code);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.save.started).toBe(true);
+    expect(parsed.save.sessions.kickoff?.stars).toBe(2);
+    expect(parsed.save.sessions.len?.stars).toBe(1);
+    expect(parsed.save.insights).toEqual(['l1']);
+    expect(parsed.save.moves).toEqual(['echo']);
+    expect(parsed.save.readings.len).toEqual(['len-1']);
+    expect(parsed.save.maeSeen).toBe('len');
+    expect(parsed.save.settings.timer).toBe(false);
+    expect(parsed.save.settings.narrate).toBe(true);
+  });
+
+  it('accepts whitespace inside a pasted code', () => {
+    const sample = migrate({ v: 2, started: true, sessions: { kickoff: { stars: 1, best: 0.5, plays: 1 } } });
+    const code = exportSaveCode(sample);
+    const broken = `${code.slice(0, 12)}\n  ${code.slice(12)}`;
+    const parsed = parseSaveCode(broken);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('rejects empty, wrong-prefix and blank progress codes', () => {
+    expect(parseSaveCode('').ok).toBe(false);
+    expect(parseSaveCode('HELLO.abc').ok).toBe(false);
+    const blank = exportSaveCode(migrate(null));
+    const empty = parseSaveCode(blank);
+    expect(empty.ok).toBe(false);
+  });
+
+  it('applySave replaces in-memory progress', () => {
+    const snap = structuredClone(state);
+    const loaded = migrate({
+      v: 2,
+      started: true,
+      sessions: { kickoff: { stars: 3, best: 1, plays: 1 } },
+      maeSeen: 'kickoff',
+    });
+    applySave(loaded);
+    expect(state.sessions.kickoff?.stars).toBe(3);
+    expect(state.maeSeen).toBe('kickoff');
+    expect(currentStep()).toBe('len');
+    Object.assign(state, snap);
   });
 });
 

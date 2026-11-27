@@ -88,6 +88,55 @@ export function resetSave() {
   save();
 }
 
+/** Replace in-memory state and persist it. Used when loading a save code. */
+export function applySave(next: Save) {
+  Object.assign(state, blank(), next, { v: 2 as const });
+  save();
+}
+
+const SAVE_PREFIX = 'TLLM2.';
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToBytes(b64url: string): Uint8Array {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+  const bin = atob(b64 + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Portable save code for another browser or device. Progress already auto-saves on this one. */
+export function exportSaveCode(s: Save = state): string {
+  const json = JSON.stringify(s);
+  return SAVE_PREFIX + bytesToBase64Url(new TextEncoder().encode(json));
+}
+
+export function parseSaveCode(code: string): { ok: true; save: Save } | { ok: false; error: string } {
+  const trimmed = code.trim().replace(/\s+/g, '');
+  if (!trimmed) return { ok: false, error: 'Paste a save code first.' };
+  if (!/^TLLM2\./i.test(trimmed)) {
+    return { ok: false, error: 'That doesn’t look like a Talk Less, Learn More save code. It should start with TLLM2.' };
+  }
+  try {
+    const raw = new TextDecoder().decode(base64UrlToBytes(trimmed.slice(SAVE_PREFIX.length)));
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'That save code is empty or damaged.' };
+    const saveData = migrate(parsed);
+    if (!saveData.started && !Object.keys(saveData.sessions).length && !saveData.synth.done) {
+      return { ok: false, error: 'That save code has no progress yet.' };
+    }
+    return { ok: true, save: saveData };
+  } catch {
+    return { ok: false, error: 'That save code couldn’t be read. Copy it again in one piece.' };
+  }
+}
+
 const done = (id: StepId) => (id === 'wall' ? state.synth.done : (state.sessions[id]?.stars ?? 0) >= 1);
 
 /** How many leading steps are cleared. */

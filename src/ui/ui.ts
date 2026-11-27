@@ -8,7 +8,7 @@ import { DEFINED_STATEMENT, KICKOFF_STATEMENT, OTHER_CYCLE_METHODS } from '../da
 import { PORTRAIT_URL } from '../art/draw';
 import { sfx, music } from '../audio';
 import { voice } from '../voice';
-import { state, save, rank, totalStars, MAX_STARS, objective } from '../state';
+import { state, save, rank, totalStars, MAX_STARS, objective, exportSaveCode, parseSaveCode, applySave } from '../state';
 
 const root = document.getElementById('ui')!;
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -186,6 +186,8 @@ export const ui = {
   busy: () => busyCount > 0,
   justClosed: () => performance.now() - lastClose < 250,
   onReset: (() => {}) as () => void,
+  /** Called after a save code is loaded so the town can restart into Continue. */
+  onLoadSave: (() => {}) as () => void,
 
   toast(text: string, kind: 'good' | 'info' = 'info') {
     const t = el(`<div class="toast panel slim ${kind}">${esc(text)}</div>`);
@@ -203,9 +205,11 @@ export const ui = {
       </div>
       <p class="title-sub">A pixel RPG about talking to customers. Ask well, listen more, and fill the insight wall.</p>
       ${voice.supported ? `<p class="title-voice">${SPEAKER_ICON}<span>Fully voiced. Turn your sound on.</span></p>` : ''}
+      ${opts.canContinue ? `<p class="title-save muted">Progress is saved on this device. Continue picks up where you left off.</p>` : ''}
       <div class="title-btns">
         ${opts.canContinue ? `<button class="pbtn" data-a="cont">Continue</button>` : ''}
         <button class="pbtn ${opts.canContinue ? 'alt' : ''}" data-a="new">${opts.canContinue ? 'New game' : 'Start'}</button>
+        <button class="pbtn alt" data-a="load">Load save code</button>
         <button class="pbtn alt" data-a="how">How to play</button>
         <button class="pbtn alt" data-a="settings">Settings</button>
       </div>
@@ -228,6 +232,7 @@ export const ui = {
           if (a === 'new') { if (opts.canContinue) confirmNew(); else go(opts.onNew); }
           if (a === 'yes') go(opts.onNew);
           if (a === 'no') { off(); m.close(); ui.title(opts); }
+          if (a === 'load') void ui.loadSaveCode().then((ok) => { if (ok) { off(); m.close(); ui.onLoadSave(); } });
           if (a === 'how') {
             panel.hidden = !(panel.hidden || panel.dataset.v !== 'how');
             panel.dataset.v = 'how';
@@ -239,6 +244,7 @@ export const ui = {
               <li><b>Insight</b> rises when customers tell you what really happens. After a session, tell the team or park each note.</li>
               <li><b>Bias</b> rises when your words end up in their mouths. Your score loses half a point for each point of bias.</li>
               <li><b>Start with the problem</b>: who, what, where, when, why — and leave the solution out.</li>
+              <li><b>Progress</b> saves on this device automatically. Copy a save code from the pause menu to move to another browser.</li>
               <li><b>Listen</b> to any line again with the speaker button. Turn on “Read everything aloud” in Settings to hear coaching tips too.</li>
             </ul>`;
           }
@@ -257,6 +263,85 @@ export const ui = {
     const off = pushKeys((e) => {
       if (e.key === 'Enter') { (m.box.querySelector<HTMLButtonElement>('.title-btns .pbtn'))?.click(); return true; }
       return false;
+    });
+  },
+
+  /** Copy the current save as a portable code. Returns true if the clipboard write worked. */
+  async copySaveCode(): Promise<boolean> {
+    const code = exportSaveCode();
+    try {
+      await navigator.clipboard.writeText(code);
+      return true;
+    } catch {
+      await ui.showSaveCode(code);
+      return false;
+    }
+  },
+
+  showSaveCode(code: string): Promise<void> {
+    return new Promise((resolve) => {
+      const m = modal(`
+        <h2>Your save code</h2>
+        <p class="muted">Copy this code. On another browser, open the title screen or pause menu and choose Load save code.</p>
+        <textarea class="save-code" readonly rows="6" aria-label="Save code">${esc(code)}</textarea>
+        <div class="row-end">
+          <button class="pbtn alt" data-a="close">Close</button>
+          <button class="pbtn" data-a="copy">Copy</button>
+        </div>
+      `, 'small');
+      const area = m.box.querySelector<HTMLTextAreaElement>('textarea')!;
+      area.focus();
+      area.select();
+      const done = () => { off(); m.close(); resolve(); };
+      m.box.querySelector<HTMLButtonElement>('[data-a=close]')!.onclick = done;
+      m.box.querySelector<HTMLButtonElement>('[data-a=copy]')!.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(code);
+          ui.toast('Save code copied.', 'good');
+        } catch {
+          area.select();
+          ui.toast('Select the code and copy it manually.', 'info');
+        }
+      };
+      const off = pushKeys((e) => { if (e.key === 'Escape') { done(); return true; } return false; });
+    });
+  },
+
+  /** Paste UI for a save code. Returns true if a save was applied. */
+  loadSaveCode(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const m = modal(`
+        <h2>Load save code</h2>
+        <p class="muted">Paste a code from Export save code. This replaces progress on this device.</p>
+        <textarea class="save-code" rows="6" placeholder="TLLM2.…" aria-label="Paste save code"></textarea>
+        <p class="save-err muted" hidden></p>
+        <div class="row-end">
+          <button class="pbtn alt" data-a="no">Cancel</button>
+          <button class="pbtn" data-a="yes">Load</button>
+        </div>
+      `, 'small');
+      const area = m.box.querySelector<HTMLTextAreaElement>('textarea')!;
+      const err = m.box.querySelector<HTMLElement>('.save-err')!;
+      area.focus();
+      const done = (v: boolean) => { off(); m.close(); resolve(v); };
+      m.box.querySelector<HTMLButtonElement>('[data-a=no]')!.onclick = () => done(false);
+      m.box.querySelector<HTMLButtonElement>('[data-a=yes]')!.onclick = () => {
+        const parsed = parseSaveCode(area.value);
+        if (!parsed.ok) {
+          err.hidden = false;
+          err.textContent = parsed.error;
+          sfx.bad();
+          return;
+        }
+        applySave({ ...parsed.save, started: true });
+        sfx.unlock();
+        ui.toast('Save loaded. Welcome back.', 'good');
+        done(true);
+      };
+      const off = pushKeys((e) => {
+        if (e.key === 'Escape') { done(false); return true; }
+        return false;
+      });
     });
   },
 
@@ -502,9 +587,12 @@ export const ui = {
     const m = modal(`
       <div class="j-head"><h2>Paused</h2><button class="pbtn alt small" data-a="close">Resume <kbd>Esc</kbd></button></div>
       <div class="menu-rank"><b>${esc(rank())}</b> · <i class="star on"></i> ${totalStars()} / ${MAX_STARS}</div>
+      <p class="muted menu-save-note">Progress saves on this device as you play. Export a save code to continue on another browser.</p>
       ${settingsHtml()}
       <div class="menu-actions">
         <button class="pbtn alt" data-a="journal">Open journal</button>
+        <button class="pbtn alt" data-a="export">Export save code</button>
+        <button class="pbtn alt" data-a="load">Load save code</button>
         <button class="pbtn alt danger" data-a="reset">Start over</button>
       </div>
       <p class="title-credit">Lessons from <a href="https://www.nngroup.com" target="_blank" rel="noopener">nngroup.com</a>. Unofficial study game, not affiliated with Nielsen Norman Group.</p>
@@ -513,6 +601,14 @@ export const ui = {
     const close = () => { off(); m.close(); };
     m.box.querySelector<HTMLButtonElement>('[data-a=close]')!.onclick = close;
     m.box.querySelector<HTMLButtonElement>('[data-a=journal]')!.onclick = () => { close(); ui.journal(); };
+    m.box.querySelector<HTMLButtonElement>('[data-a=export]')!.onclick = async () => {
+      const copied = await ui.copySaveCode();
+      if (copied) ui.toast('Save code copied. Keep it somewhere safe.', 'good');
+    };
+    m.box.querySelector<HTMLButtonElement>('[data-a=load]')!.onclick = async () => {
+      close();
+      if (await ui.loadSaveCode()) ui.onLoadSave();
+    };
     m.box.querySelector<HTMLButtonElement>('[data-a=reset]')!.onclick = async () => {
       close();
       if (await ui.confirm('Start over?', 'Your stars, insights and collected moves will be erased. Settings are kept.', 'Erase and restart', 'Cancel')) ui.onReset();

@@ -206,6 +206,7 @@ export class TownScene extends Phaser.Scene {
       this.wired = true;
       this.events.on('resume', this.onResume, this);
       ui.onReset = () => { resetSave(); state.started = true; save(); this.scene.restart({ attract: false }); };
+      ui.onLoadSave = () => { state.started = true; save(); this.scene.restart({ attract: false }); };
     }
 
     this.refresh(false);

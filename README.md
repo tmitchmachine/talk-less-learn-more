@@ -19,7 +19,7 @@ All the lessons in the game come from [Nielsen Norman Group](https://www.nngroup
 
 - **Hear every line.** Characters speak their lines out loud, each with their own voice, and their portraits lip-sync. Press the speaker button (or L) to hear a line again. In Settings you can turn voices off, change their speed, or turn on “Read everything aloud” to also hear scene notes, your own lines, coaching tips and results.
 
-Progress saves in your browser's local storage.
+Progress saves automatically in your browser’s local storage. Use **Continue** on the title screen to pick up where you left off on this device. To move to another browser, open the pause menu (Esc) and choose **Export save code**, then **Load save code** on the other device (also available from the title screen).
 
 ## Sources
 
