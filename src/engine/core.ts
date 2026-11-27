@@ -29,7 +29,7 @@ export function autoQuality(): Quality {
   return 'high';
 }
 export function currentQuality(): Quality {
-  const q = state.settings.graphics;
+  const q = state.settings.graphics ?? 'auto';
   return q === 'auto' ? autoQuality() : q;
 }
 

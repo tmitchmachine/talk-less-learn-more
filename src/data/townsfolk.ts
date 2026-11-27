@@ -1,4 +1,6 @@
 import type { SrcKey } from './sources';
+import type { StepId } from './steps';
+import { state } from '../state';
 
 export interface Line { name: string; who?: string; text: string }
 
@@ -44,31 +46,63 @@ export const NOTICEBOARD: string[] = [
   'Utility is a separate question: does it have the features people need? Useful = usability + utility.',
 ];
 
-/** Mae's lines for each point in the story. Stage = sessions completed (+1 once the wall is sorted). */
-export function maeLines(stage: number, rank: string): string[] {
-  switch (stage) {
-    case 0: return [
+const WORKSHOP_STEPS: StepId[] = ['kickoff', 'define', 'ideate', 'next'];
+export const isWorkshopStep = (step: StepId | 'done') => step !== 'done' && WORKSHOP_STEPS.includes(step);
+
+/** Mae's lines keyed by the step she is briefing. */
+export function maeLines(step: StepId | 'done', rank: string): string[] {
+  const migrated = state.migrated
+    ? ['The lab now starts every project with a problem statement. Your stars and notes are safe.']
+    : [];
+
+  switch (step) {
+    case 'kickoff': return [
+      ...migrated,
       'Welcome to Fieldtown! I’m Mae. I run the research lab.',
-      'Our customers will tell you a lot, if you let them. Your job is to ask well, and then mostly listen.',
-      'Rule one: treat every conversation like a research study, not a sales pitch.',
-      'Rosa runs the taco truck in the market, southwest of here. She stopped using our inventory app and we don’t know why. Go find out.',
-      'Arrow keys or WASD to walk (or drag on a touchscreen). E or Space to talk. J opens your journal.',
+      'You walked in with a sticky that says “an app for small businesses.” That names a solution and too many people.',
+      'Before anyone talks to customers, we write the problem: who, what, where, when, and why. No feature in the sentence.',
+      'Come into the lab with me. Arrow keys or WASD to walk (or drag on a touchscreen). E or Space to talk. J opens your journal.',
     ];
-    case 1: return [
-      'Nice work with Rosa. Every note on that wall came from asking about real moments.',
-      'Next up: Theo, at the vet clinic east of the plaza. This one’s a usability test.',
-      'Give him a realistic task, ask him to think aloud, then... shut up and let him do the talking.',
-      'I had the road crew open the east road for you.',
+    case 'len': return [
+      'Good. One problem, one place you can visit Saturday.',
+      'Len runs a coffee stall in the market, southwest of here. He’s never used StockPot. Learn last week. Do not pitch.',
+      'Go where the users are, watch, ask, and listen.',
     ];
-    case 2: return [
-      'Theo’s session showed exactly why we watch instead of explain.',
-      'Last one: Priya, at Kite Bank in the southeast. Jordan from product will be passing you notes.',
-      'Remember: pay attention to what users do, not what they say. The south road is open.',
+    case 'rosa': return [
+      'Len told you how the morning count fails to reach Sam.',
+      'Rosa is at the taco truck in the same market. Same who, where and when. There’s no design to test today.',
+      'Ask about real moments. Before you brief anyone, separate what you can stand behind from what you should park.',
     ];
-    case 3: return [
-      'That’s all three customers! Your notebook is full.',
+    case 'define': return [
+      'You have notes from two people. Time to define.',
+      'Combine what you told the team. Look for a common pain. Refine the statement. Still no solution.',
+    ];
+    case 'ideate': return [
+      'Quantity first. No idea is too far-fetched yet.',
+      'Jordan from product will sit in. Keep his favorite as one sketch among several, then pick a subset for paper.',
+    ];
+    case 'len-paper': return [
+      'Take the shared count sheet back to Len. Rough is fine.',
+      'Don’t ask if he likes it. Give him this morning’s count and watch where he stalls.',
+    ];
+    case 'theo': return [
+      'Different client, different problem statement.',
+      'PawPoint’s site is already live, and the question is whether new customers can book on their own.',
+      'When you can do one thing to improve a live system, run a think-aloud test. The east road is open.',
+    ];
+    case 'priya': return [
+      'Kite has two designs and one question: which one works.',
+      'Watch the same task on both, then check what people did, not what they say. The south road is open.',
+    ];
+    case 'wall': return [
+      'Your notebook is full from this cycle and the client visits.',
       'Come into the lab. Time to sort what we learned on the wall.',
     ];
+    case 'next': return [
+      'Teams often return to empathize and define after a prototype is tested.',
+      'Plan the next cycle with me. Implement comes after the test; it doesn’t replace it.',
+    ];
+    case 'done':
     default: return [
       `You did it. The team calls you: ${rank}.`,
       'Replay any session to earn more stars. The strong moves you’ve collected are in your journal.',

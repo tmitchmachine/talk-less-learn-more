@@ -1,0 +1,133 @@
+import type { SrcKey } from './sources';
+
+export interface Claim {
+  id: string;
+  session: string;
+  call: 'tell' | 'park';
+  text: string;
+  needs?: string;
+  why: string;
+  src: SrcKey | SrcKey[];
+}
+
+export const CLAIMS: Claim[] = [
+  // Len interview
+  { id: 'len-1', session: 'len', call: 'tell', needs: 'l1',
+    text: 'Last Saturday Len counted cups, lids and milk on the van’s back step at 6 a.m., marker in one hand.',
+    why: 'A specific past episode you heard. Tell the team.',
+    src: ['cheat', 'interviews'] },
+  { id: 'len-2', session: 'len', call: 'tell', needs: 'l4',
+    text: 'Sam buys supplies Friday from a photo of the board. Last week that photo was from Wednesday.',
+    why: 'A concrete handoff failure from his story. Tell the team.',
+    src: 'cheat' },
+  { id: 'len-3', session: 'len', call: 'tell', needs: 'l5',
+    text: 'Today Len texts Sam a photo of the board when he remembers. A shared spreadsheet lasted a week.',
+    why: 'Current behavior, not a promise. Tell the team.',
+    src: 'firstrule' },
+  { id: 'len-4', session: 'len', call: 'park',
+    text: '“Just have it text me when I’m low.”',
+    why: 'A feature request is a guessed fix. Park it until behavior asks.',
+    src: 'firstrule' },
+  { id: 'len-5', session: 'len', call: 'park',
+    text: '“I’m just not a tech person.”',
+    why: 'His own guess at the cause. Park the rationalization.',
+    src: 'firstrule' },
+  { id: 'len-6', session: 'len', call: 'park',
+    text: '“Build it and I’ll be your first customer.”',
+    why: 'A prediction about future use. Park it.',
+    src: 'firstrule' },
+
+  // Rosa
+  { id: 'rosa-1', session: 'rosa', call: 'tell', needs: 'r1',
+    text: 'Rosa counts stock at 5:30 a.m. in a dim walk-in fridge, phone in one hand.',
+    why: 'A specific morning she described. Tell the team.',
+    src: 'interviews' },
+  { id: 'rosa-2', session: 'rosa', call: 'tell', needs: 'r4',
+    text: 'Auto-reorder fired twice and she got forty extra pounds of avocados. She stopped trusting alerts.',
+    why: 'A costly episode from her past. Tell the team.',
+    src: 'interviews' },
+  { id: 'rosa-3', session: 'rosa', call: 'tell', needs: 'r6',
+    text: 'The clipboard is shared. Her cousin reads it on the late shift; the app lives on her phone.',
+    why: 'Current workaround that explains the handoff. Tell the team.',
+    src: 'firstrule' },
+  { id: 'rosa-4', session: 'rosa', call: 'park',
+    text: 'Voice input, because it would be cool.',
+    why: 'A feature request. The need behind it (gloves, cold hands) may be worth telling; the feature stays parked.',
+    src: 'firstrule' },
+  { id: 'rosa-5', session: 'rosa', call: 'park',
+    text: '“I’ll definitely come back to the app if you fix the scanner.”',
+    why: 'A prediction. Park it.',
+    src: 'firstrule' },
+
+  // Len paper
+  { id: 'len-paper-1', session: 'len-paper', call: 'tell', needs: 'lp1',
+    text: 'Len counts lids by the sleeve. The sheet asked for single lids.',
+    why: 'Something that happened in front of you. Tell the team.',
+    src: 'cheat' },
+  { id: 'len-paper-2', session: 'len-paper', call: 'tell', needs: 'lp3',
+    text: 'He wrote milk in the lids row once. The rows don’t follow his shelves.',
+    why: 'An error you watched. Tell the team.',
+    src: 'cheat' },
+  { id: 'len-paper-3', session: 'len-paper', call: 'tell', needs: 'lp4',
+    text: 'He couldn’t show where Sam would see the count.',
+    why: 'A task failure you asked him to demonstrate. Tell the team.',
+    src: 'cheat' },
+  { id: 'len-paper-4', session: 'len-paper', call: 'park',
+    text: '“Looks nice. I’d use this.”',
+    why: 'An opinion and a prediction. Don’t gather opinions as findings.',
+    src: ['cheat', 'firstrule'] },
+  { id: 'len-paper-5', session: 'len-paper', call: 'park',
+    text: '“Move the lids to the top.”',
+    why: 'A tip is a hypothesis. Park it until shelf order asks for it.',
+    src: 'firstrule' },
+
+  // Theo
+  { id: 'theo-1', session: 'theo', call: 'tell', needs: 't1',
+    text: 'Theo read “Wellness Plan” as a one-time checkup.',
+    why: 'What he did with the label. Tell the team.',
+    src: 'talking' },
+  { id: 'theo-2', session: 'theo', call: 'tell', needs: 't4',
+    text: 'He clicked “Next month” four times to find a slot.',
+    why: 'Behavior you watched. Tell the team.',
+    src: 'firstrule' },
+  { id: 'theo-3', session: 'theo', call: 'tell', needs: 't6',
+    text: 'The required phone-number field is what dragged his rating down.',
+    why: 'The reason behind the score, after a neutral probe. Tell the team.',
+    src: 'interviews' },
+  { id: 'theo-4', session: 'theo', call: 'park',
+    text: 'The bare “I’d give it a 7.”',
+    why: 'A number without the why isn’t a finding. Park the score alone.',
+    src: 'firstrule' },
+  { id: 'theo-5', session: 'theo', call: 'park', needs: 't2',
+    text: '“I’d just call the clinic” if it asks for a password.',
+    why: 'Park the prediction. Keep what you saw: he expected a forced sign-up.',
+    src: 'firstrule' },
+
+  // Priya
+  { id: 'priya-1', session: 'priya', call: 'tell',
+    text: 'Design B finished faster with no wrong taps; Design A took about two minutes and two wrong taps.',
+    why: 'Performance you (and Jordan) saw. Tell the team, whether or not she preferred A.',
+    src: 'firstrule' },
+  { id: 'priya-2', session: 'priya', call: 'tell', needs: 'p5',
+    text: 'She opened search twice today, once on each design.',
+    why: 'Behavior that contradicted her self-report. Tell the team.',
+    src: 'firstrule' },
+  { id: 'priya-3', session: 'priya', call: 'tell', needs: 'p3',
+    text: 'Last night the bright screen made her wait until morning to check a client payment.',
+    why: 'A real evening episode behind the dark-mode request. Tell the team.',
+    src: 'firstrule' },
+  { id: 'priya-4', session: 'priya', call: 'park',
+    text: '“I definitely prefer A.”',
+    why: 'Preference after (or before) use is not performance. Park the preference as the ship decision.',
+    src: 'firstrule' },
+  { id: 'priya-5', session: 'priya', call: 'park',
+    text: '“Dark mode, every single day.”',
+    why: 'A prediction. Park it.',
+    src: 'firstrule' },
+  { id: 'priya-6', session: 'priya', call: 'park',
+    text: '“I would have seen Split bill if it were bigger.”',
+    why: 'Her theory about why. The fact is she missed it; the fix stays parked.',
+    src: 'firstrule' },
+];
+
+export const claimsFor = (sessionId: string) => CLAIMS.filter((c) => c.session === sessionId);

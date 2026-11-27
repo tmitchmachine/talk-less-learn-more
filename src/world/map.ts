@@ -73,6 +73,7 @@ export function buildTown(): Town {
     { key: 'bench', tx: 22, ty: 12 },
     { key: 'crate', tx: 3, ty: 23 },
     { key: 'crate', tx: 4, ty: 23 },
+    { key: 'crate', tx: 12, ty: 21 },
     { key: 'pot', tx: 16, ty: 6 },
     { key: 'pot', tx: 23, ty: 6 },
     { key: 'crate', tx: 12, ty: 24 },
@@ -82,6 +83,7 @@ export function buildTown(): Town {
   const npcs: Spot[] = [
     { id: 'mae', tx: 22, ty: 9, face: 'down' },
     { id: 'rosa', tx: 8, ty: 22, face: 'down' },
+    { id: 'len', tx: 11, ty: 21, face: 'left' },
     { id: 'theo', tx: 35, ty: 8, face: 'left' },
     { id: 'priya', tx: 33, ty: 20, face: 'down' },
     { id: 'ivy', tx: 16, ty: 12, face: 'right' },

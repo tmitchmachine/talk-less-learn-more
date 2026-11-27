@@ -6,6 +6,7 @@ export const CAST: Record<string, CastMember> = {
   player: { name: 'You', look: { skin: '#d6a27a', hair: '#3b2a20', shirt: '#e6b84a', pants: '#2d3a5a', style: 'cap', cap: '#c8463a' } },
   mae: { name: 'Mae', look: { skin: '#6b4430', hair: '#e4e1da', shirt: '#7a3e8e', pants: '#3a3550', style: 'bun', glasses: true } },
   rosa: { name: 'Rosa', look: { skin: '#b97a4e', hair: '#2a1a12', shirt: '#2f7a6b', pants: '#3a3550', style: 'bun' } },
+  len: { name: 'Len', look: { skin: '#c49a6c', hair: '#4a3428', shirt: '#6b4a2e', pants: '#2f3548', style: 'short' } },
   theo: { name: 'Theo', look: { skin: '#e1b48e', hair: '#7a4b2a', shirt: '#3b4f9a', pants: '#3b3a40', style: 'short', glasses: true } },
   priya: { name: 'Priya', look: { skin: '#8c5a3c', hair: '#141010', shirt: '#b5493c', pants: '#2b2f3a', style: 'long' } },
   jordan: { name: 'Jordan', look: { skin: '#f0c9a0', hair: '#d9a441', shirt: '#555b6e', pants: '#2b2f3a', style: 'spiky' } },

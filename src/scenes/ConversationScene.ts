@@ -1,40 +1,24 @@
 import Phaser from 'phaser';
-import { SESSIONS, SILENCE, maxIns, type Choice, type Session, type Turn } from '../data/sessions';
+import { SESSIONS, sessionWho, type Choice, type Session } from '../data/sessions';
 import type { Emote, Mood } from '../art/draw';
-import { learnMove, recordSession, state } from '../state';
-import { esc, ui } from '../ui/ui';
+import { ui } from '../ui/ui';
 import { sfx } from '../audio';
 import { voice } from '../voice';
+import { runSession, type SessionView } from '../session/runner';
 
-const OPEN_DELTA = { best: 10, ok: 0, bad: -15 } as const;
 const MOOD_EMOTE: Record<Mood, Emote> = { open: 'heart', neutral: 'dots', guarded: 'sweat', confused: 'q' };
-const TIMER_MS = 25000;
 
 type Room = Session['room'];
 const ROOMS: Record<Room, { wall: number; wall2: number; trim: number; floor: number; floor2: number; frame: number }> = {
   truck: { wall: 0x8a3b2e, wall2: 0x7a3328, trim: 0x4a2a1e, floor: 0x5a4030, floor2: 0x4c3628, frame: 0xe0b33a },
   clinic: { wall: 0xcfe3e0, wall2: 0xbfd6d2, trim: 0x8aa7a2, floor: 0x8a9aa8, floor2: 0x7a8a98, frame: 0xf1efe8 },
   bank: { wall: 0x2d3e66, wall2: 0x283759, trim: 0x1b2540, floor: 0x3a3442, floor2: 0x332e3b, frame: 0xcfcac0 },
+  lab: { wall: 0x5a3a22, wall2: 0x4a2e1a, trim: 0x3a2414, floor: 0xb08850, floor2: 0xa07a45, frame: 0xc9a36b },
 };
-
-const wc = (s?: string) => (s && !/^\s*[[(]/.test(s) ? s.trim().split(/\s+/).length : 0);
-function shuffle(n: number) {
-  const a = [...Array(n).keys()];
-  for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-  return a;
-}
 
 export class ConversationScene extends Phaser.Scene {
   private s!: Session;
   private idx = 0;
-  private ti = 0;
-  private open = 60;
-  private ins = 0;
-  private bias = 0;
-  private you = 0;
-  private them = 0;
-  private streak = 0;
-  private found: string[] = [];
   private mood: Mood = 'neutral';
   private alive = true;
   private bg!: Phaser.GameObjects.Graphics;
@@ -56,8 +40,9 @@ export class ConversationScene extends Phaser.Scene {
   create(data: { index: number }) {
     this.idx = data.index;
     this.s = SESSIONS[this.idx];
-    this.ti = 0; this.open = 60; this.ins = 0; this.bias = 0; this.you = 0; this.them = 0; this.streak = 0;
-    this.found = []; this.mood = 'neutral'; this.alive = true; this.jor = undefined;
+    this.mood = 'neutral'; this.alive = true; this.jor = undefined;
+    const who = sessionWho(this.s);
+    const workshop = this.s.mode === 'workshop';
 
     document.body.dataset.scene = 'convo';
     this.cameras.main.setBackgroundColor('#141826');
@@ -66,7 +51,7 @@ export class ConversationScene extends Phaser.Scene {
     this.bg.postFX?.addBlur(0, 1, 1, 0.9);
     this.spot = this.add.image(0, 0, 'glow').setTint(0xffe6b0).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.28);
     if (this.s.observer) this.jor = this.add.sprite(0, 0, 'pt-jordan', 'neutral').setOrigin(0.5, 1).setAlpha(0.5);
-    this.por = this.add.sprite(0, 0, `pt-${this.s.id}`, 'neutral').setOrigin(0.5, 1);
+    this.por = this.add.sprite(0, 0, `pt-${who}`, 'neutral').setOrigin(0.5, 1);
     this.fg = this.add.graphics();
     this.light = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
     this.motes = this.add.particles(0, 0, 'mote', {
@@ -74,30 +59,47 @@ export class ConversationScene extends Phaser.Scene {
       scale: { min: 0.15, max: 0.4 }, alpha: { values: [0, 0.6, 0], interpolation: 'linear' },
       tint: 0xfff2cc, blendMode: Phaser.BlendModes.ADD, frequency: 140, maxAliveParticles: 40,
     });
-    this.rec = this.add.rectangle(0, 0, 4, 4, 0xff5a4e).setOrigin(0, 0);
+    this.rec = this.add.rectangle(0, 0, 4, 4, 0xff5a4e).setOrigin(0, 0).setVisible(!workshop);
     this.emote = this.add.sprite(0, 0, 'emotes', 'dots').setVisible(false);
     this.layout();
 
     this.scale.on('resize', this.layout, this);
     this.events.once('shutdown', () => { this.scale.off('resize', this.layout, this); this.alive = false; voice.stop(); });
     this.time.addEvent({ delay: 2900, loop: true, callback: () => this.blink() });
-    this.time.addEvent({ delay: 500, loop: true, callback: () => this.rec.setVisible(!this.rec.visible) });
+    if (!workshop) this.time.addEvent({ delay: 500, loop: true, callback: () => this.rec.setVisible(!this.rec.visible) });
     this.cameras.main.fadeIn(350);
 
     ui.convoOpen(this.s, () => this.exit());
-    this.meters();
-    this.time.delayedCall(450, () => void this.runTurn());
+    this.time.delayedCall(450, () => void this.startRunner());
   }
 
   update(time: number) {
     const bob = Math.sin(time / 650) > 0 ? 0 : this.ps;
     this.por.y = this.baseY + bob;
     if (this.jor) this.jor.y = this.jorBaseY;
-    // Lip sync: flap the mouth while this character's voice is playing.
     const who = voice.current();
+    const face = sessionWho(this.s);
     const flap = Math.floor(time / 130) % 3 !== 2;
-    if (!this.blinking) this.por.setFrame(who === this.s.id && flap ? `${this.mood}-t` : this.mood);
+    if (!this.blinking) this.por.setFrame(who === face && flap ? `${this.mood}-t` : this.mood);
     if (this.jor) this.jor.setFrame(who === 'jordan' && flap ? 'neutral-t' : 'neutral');
+  }
+
+  private async startRunner() {
+    const view: SessionView = {
+      setMood: (m) => this.setMood(m),
+      react: (v, unlocked) => this.react(v, unlocked),
+      pingObserver: () => this.jordanPing(),
+      walkOut: async () => {
+        this.tweens.add({ targets: this.por, alpha: 0, x: this.por.x + 60, duration: 700 });
+        await this.wait(1000);
+      },
+      dim: (on) => { this.por.setAlpha(on ? 0.35 : 1); },
+      alive: () => this.alive,
+    };
+    const r = await runSession(this.idx, view);
+    if (!this.alive) return;
+    if (r === 'retry') { ui.convoClose(); this.scene.restart({ index: this.idx }); }
+    else this.exit();
   }
 
   /* ---------------- scene art ---------------- */
@@ -156,6 +158,11 @@ export class ConversationScene extends Phaser.Scene {
       bg.fillStyle(0x6dad5a).fillRect(wx, wy + wh - 8 * u, ww, 8 * u);
       bg.fillStyle(0x8a5a32).fillRect(wx + 10 * u, wy + wh - 16 * u, 18 * u, 8 * u);
       bg.fillStyle(0xe0457b).fillRect(wx + 40 * u, wy + wh - 14 * u, 14 * u, 6 * u);
+    } else if (this.s.room === 'lab') {
+      bg.fillStyle(0xd4b896).fillRect(wx, wy, ww, wh);
+      bg.fillStyle(0x5a3a22).fillRect(wx + 4 * u, wy + 4 * u, ww - 8 * u, wh - 8 * u);
+      const cards = [0xf6d865, 0xef8fb0, 0xa9c7ff, 0xa9e0b8];
+      cards.forEach((c, i) => bg.fillStyle(c).fillRect(wx + 6 * u + (i % 2) * 14 * u, wy + 6 * u + Math.floor(i / 2) * 12 * u, 12 * u, 10 * u));
     } else {
       bg.fillStyle(0x9fd3e6).fillRect(wx, wy, ww, wh);
       bg.fillStyle(0xf4f8fb).fillRect(wx + 8 * u, wy + 8 * u, 14 * u, 4 * u).fillRect(wx + 12 * u, wy + 5 * u, 7 * u, 3 * u);
@@ -164,7 +171,7 @@ export class ConversationScene extends Phaser.Scene {
     }
     // Sunlight falling from the window across the room (the bank's one-way mirror stays dark)
     if (this.s.room !== 'bank') {
-      const c = this.s.room === 'truck' ? 0xffd8a0 : 0xe8f4ff;
+      const c = this.s.room === 'truck' ? 0xffd8a0 : this.s.room === 'lab' ? 0xffe8c0 : 0xe8f4ff;
       const x0 = wx, x1 = wx + ww, yb = h, spread = w * 0.22;
       light.fillGradientStyle(c, c, c, c, 0.16, 0.16, 0, 0);
       light.fillTriangle(x0, wy + wh, x1, wy + wh, x0 - spread, yb);
@@ -206,6 +213,11 @@ export class ConversationScene extends Phaser.Scene {
       fg.fillStyle(0xf4f1ea).fillRect(ix + u, ty - 10 * u, 9 * u, 10 * u);
       fg.fillStyle(0x7a8090).fillRect(ix + 2 * u, ty - 8 * u, 6 * u, u).fillRect(ix + 2 * u, ty - 6 * u, 5 * u, u).fillRect(ix + 2 * u, ty - 4 * u, 6 * u, u);
       fg.fillStyle(0x3a3f4a).fillRect(ix + 3 * u, ty - 13 * u, 5 * u, 2 * u);
+    } else if (this.s.room === 'lab') {
+      for (const [ox, col] of [[0, 0xf6d865], [8, 0xa9c7ff], [16, 0xef8fb0]] as const) {
+        fg.fillStyle(col).fillRect(ix + ox * u, ty - 10 * u, 7 * u, 9 * u);
+        fg.fillStyle(0x3a2f05, 0.35).fillRect(ix + (ox + 1) * u, ty - 7 * u, 5 * u, u);
+      }
     } else {
       for (const [ox, col] of [[0, 0x86a6ff], [9, 0xf6d865]] as const) {
         fg.fillStyle(0x1b1424).fillRect(ix + ox * u, ty - 12 * u, 7 * u, 12 * u);
@@ -268,108 +280,7 @@ export class ConversationScene extends Phaser.Scene {
     }
   }
 
-  private meters() {
-    const tu = this.s.turns[Math.min(this.ti, this.s.turns.length - 1)];
-    ui.convoMeters({ open: this.open, ins: this.ins, mx: maxIns(this.s), bias: this.bias, streak: this.streak, t: tu.t });
-  }
-
-  private voiceId(who: 'p' | 'obs') { return who === 'obs' ? (this.s.observer ?? 'jordan').toLowerCase() : this.s.id; }
-
   private wait(ms: number) { return new Promise<void>((r) => this.time.delayedCall(ms, r)); }
-
-  /* ---------------- the session loop ---------------- */
-
-  private async runTurn() {
-    if (!this.alive) return;
-    const tu = this.s.turns[this.ti];
-    this.meters();
-    if (tu.who === 'obs') this.jordanPing();
-    if (tu.who === 'p' && tu.line) this.them += wc(tu.line);
-    await ui.convoLine({ ctx: tu.ctx, speaker: tu.who === 'obs' ? this.s.observer! : this.s.name, voiceId: this.voiceId(tu.who), mood: this.mood, kind: tu.who, text: tu.line });
-    if (!this.alive) return;
-    const order = shuffle(tu.choices.length);
-    const toWhom = tu.who === 'obs' ? `Reply to ${this.s.observer}` : `What do you say to ${this.s.name}?`;
-    const pick = await ui.convoChoices(order.map((i) => tu.choices[i]), state.settings.timer ? TIMER_MS : 0, toWhom);
-    if (!this.alive) return;
-    const timedOut = pick < 0;
-    const c = timedOut ? tu.choices.find((x) => x.silent) ?? SILENCE : tu.choices[order[pick]];
-    await this.resolve(tu, c, timedOut);
-  }
-
-  private async resolve(tu: Turn, c: Choice, timedOut: boolean) {
-    const rwho = c.rwho ?? tu.who;
-    const toP = tu.who === 'p' || rwho === 'p';
-    if (toP && !c.silent) this.you += wc(c.say);
-    if (rwho === 'p') this.them += wc(c.reply);
-    this.ins += c.ins;
-    this.bias += c.bias;
-    if (toP) this.open = Phaser.Math.Clamp(this.open + OPEN_DELTA[c.v], 0, 100);
-    this.streak = c.v === 'best' ? this.streak + 1 : 0;
-    let unlocked: string | null = null;
-    if (c.unlock && !this.found.includes(c.unlock)) { this.found.push(c.unlock); unlocked = this.s.insights[c.unlock]; }
-    const newMove = c.v === 'best' ? learnMove(c.tag) : false;
-    if (rwho === 'p' && c.mood) this.setMood(c.mood);
-    if (rwho === 'obs') this.jordanPing();
-    this.react(c.v, !!unlocked);
-    this.meters();
-
-    await ui.convoReply({
-      you: c.say, silent: c.silent, toObs: tu.who === 'obs' && !c.rwho,
-      speaker: rwho === 'obs' ? this.s.observer! : this.s.name, voiceId: this.voiceId(rwho), mood: this.mood, kind: rwho, text: c.reply,
-    });
-    if (!this.alive) return;
-    const left = this.open <= 0;
-    const best = c.v !== 'best' ? tu.choices.find((x) => x.v === 'best') : undefined;
-    await ui.convoCoach({ c, best, timedOut, unlocked, newMove, left });
-    if (!this.alive) return;
-    if (left) { await this.leave(); return; }
-    this.ti++;
-    if (this.ti >= this.s.turns.length) await this.finish(false);
-    else await this.runTurn();
-  }
-
-  private async leave() {
-    this.setMood('guarded');
-    sfx.fail();
-    await ui.convoLine({ speaker: this.s.name, voiceId: this.s.id, mood: 'guarded', kind: 'p', text: this.s.leave });
-    if (!this.alive) return;
-    this.tweens.add({ targets: this.por, alpha: 0, x: this.por.x + 60, duration: 700 });
-    await this.wait(1000);
-    if (this.alive) await this.finish(true);
-  }
-
-  private async finish(early: boolean) {
-    const s = this.s;
-    const mx = maxIns(s);
-    const score = early ? 0 : Phaser.Math.Clamp((this.ins - this.bias * 0.5) / mx, 0, 1);
-    const stars = early ? 0 : score >= 0.85 ? 3 : score >= 0.6 ? 2 : score >= 0.35 ? 1 : 0;
-    const { newBest } = recordSession(s.id, stars, score, this.found);
-    const keys = Object.keys(s.insights);
-    const notesHtml = `<div class="res-notes"><h3>Insight wall · ${this.found.length} of ${keys.length}</h3><div class="stickies">${keys
-      .map((k) => (this.found.includes(k) ? `<div class="sticky">${esc(s.insights[k])}</div>` : `<div class="sticky missed">Missed: ${esc(s.insights[k])}</div>`))
-      .join('')}</div></div>`;
-    const talk = this.you + this.them ? Math.round((this.you / (this.you + this.them)) * 100) : 0;
-    const headline = early ? `${s.name} left early` : ['Mostly your own opinions', 'Useful but steered', 'Solid, a few fingerprints', 'Clean, rich data'][stars];
-    const sub = early
-      ? 'Openness hit zero. Leading, pitching and interrupting push people away. Try the quieter, more open moves.'
-      : stars === 0
-        ? 'You need at least one star to move on. Try the quieter, more open moves.'
-        : `Score ${Math.round(score * 100)}%: insight minus half your bias, against the best possible session.`;
-    if (stars > 0) sfx.unlock(); else sfx.fail();
-    const r = await ui.results({
-      eyebrow: `${s.code} · ${s.kind} ${early ? 'ended' : 'complete'}`,
-      title: s.name,
-      stars,
-      headline,
-      sub,
-      newBest,
-      notesHtml,
-      stats: [[`${this.ins}/${mx}`, 'Insight'], [`${this.bias}`, 'Bias'], [`${this.found.length}/${keys.length}`, 'Insights found'], [`${talk}%`, 'Words that were yours']],
-    });
-    if (!this.alive) return;
-    if (r === 'retry') { ui.convoClose(); this.scene.restart({ index: this.idx }); }
-    else this.exit();
-  }
 
   private exit() {
     voice.stop();

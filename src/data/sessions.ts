@@ -1,4 +1,6 @@
 import type { SrcKey } from './sources';
+import { KICKOFF, DEFINE, IDEATE, NEXT, KICKOFF_STATEMENT } from './workshops';
+import { LEN, LEN_PAPER } from './len';
 
 export type Verdict = 'best' | 'ok' | 'bad';
 export type Mood = 'open' | 'neutral' | 'guarded' | 'confused';
@@ -33,14 +35,26 @@ export interface Session {
   goal: string;
   setup: string;
   place: string;
-  room: 'truck' | 'clinic' | 'bank';
+  room: 'truck' | 'clinic' | 'bank' | 'lab';
+  /** Cast id for portrait, voice and the NPC who starts it; defaults to id. */
+  who?: string;
+  mode?: 'workshop';
+  /** No star unless these insights were unlocked this run. */
+  mustFind?: string[];
+  /** Problem statement this visit serves, shown in the intro. */
+  problem?: string;
+  /** Results heading for workshop insight walls. */
+  wallTitle?: string;
   observer?: string;
   skills: string[];
   greet: string;
-  leave: string;
+  /** Workshops omit leave; customers who walk out need it. */
+  leave?: string;
   insights: Record<string, string>;
   turns: Turn[];
 }
+
+export const sessionWho = (s: Session) => s.who ?? s.id;
 
 /** What happens when the choice timer runs out and the turn has no silent option. */
 export const SILENCE: Choice = {
@@ -52,10 +66,9 @@ export const SILENCE: Choice = {
 
 export const maxIns = (s: Session) => s.turns.reduce((t, tu) => t + Math.max(...tu.choices.map((c) => c.ins)), 0);
 
-export const SESSIONS: Session[] = [
-  {
-    id: 'rosa', code: 'P1', kind: 'User interview', room: 'truck',
-    name: 'Rosa', role: 'Runs a taco truck · 6 years',
+export const ROSA: Session = {
+    id: 'rosa', code: 'P2', kind: 'User interview', room: 'truck',
+    who: 'rosa', name: 'Rosa', role: 'Runs a taco truck · 6 years',
     product: 'StockPot, an inventory app for food trucks',
     goal: 'What makes food-truck owners abandon StockPot?',
     setup: 'Rosa signed up for StockPot last year and has barely opened it since spring. There’s no design to test today. You’re here to learn about her world.',
@@ -63,6 +76,7 @@ export const SESSIONS: Session[] = [
     skills: ['Start easy', 'Open-ended questions', 'Specific past events', 'Probing', 'No leading or hypothetical questions'],
     greet: 'You’re the researcher? I’ve got about 25 minutes before the lunch rush.',
     leave: 'Sorry, I need to get back to the truck. Lunch rush.',
+    problem: KICKOFF_STATEMENT,
     insights: {
       r1: 'Counts stock at 5:30 a.m. in a dim walk-in fridge, phone in one hand',
       r2: 'Scanner can’t read barcodes in low light. Back to a paper clipboard since March',
@@ -168,10 +182,11 @@ export const SESSIONS: Session[] = [
           note: 'A number makes a prediction look precise, but it’s still a prediction. Ask about current and past behavior instead.', src: 'firstrule' },
       ] },
     ],
-  },
-  {
-    id: 'theo', code: 'P2', kind: 'Usability test', room: 'clinic',
-    name: 'Theo', role: 'Dog owner · first visit to the site',
+};
+
+export const THEO: Session = {
+    id: 'theo', code: 'P3', kind: 'Usability test', room: 'clinic',
+    who: 'theo', name: 'Theo', role: 'Dog owner · first visit to the site',
     product: 'PawPoint, a vet clinic’s booking website',
     goal: 'Can new customers book a checkup on their own?',
     setup: 'Theo has never used PawPoint. The site is on the laptop, and your job is to give a realistic task and then watch. Every word you say can change what he does.',
@@ -179,6 +194,7 @@ export const SESSIONS: Session[] = [
     skills: ['Think-aloud', 'Echo', 'Boomerang', 'Columbo', 'Knowing when to stay quiet', 'Funnel your follow-ups'],
     greet: 'Hi! I’m here for the website thing? I’ve got my dog’s info ready.',
     leave: 'I think I’m going to head out. This doesn’t feel like it’s going anywhere.',
+    problem: 'New customers try to book a checkup on PawPoint’s site, and many end up calling the clinic instead. We don’t know where they get stuck.',
     insights: {
       t1: '“Wellness Plan” (a subscription) reads as a one-time checkup',
       t2: 'Expects forced sign-up before booking. Would call the clinic instead',
@@ -301,10 +317,11 @@ export const SESSIONS: Session[] = [
           note: 'A hypothetical with a suggested answer. You learn nothing about what actually drove his rating.', src: ['mistakes', 'leading'] },
       ] },
     ],
-  },
-  {
-    id: 'priya', code: 'P3', kind: 'Design review', room: 'bank',
-    name: 'Priya', role: 'Owns a design studio · banks on her phone',
+};
+
+export const PRIYA: Session = {
+    id: 'priya', code: 'P4', kind: 'Design review', room: 'bank',
+    who: 'priya', name: 'Priya', role: 'Owns a design studio · banks on her phone',
     product: 'Kite, a mobile banking app with two new homepage designs',
     goal: 'Which homepage design should we ship?',
     setup: 'Priya is trying Design A and Design B. Jordan, the product lead, watches from behind the mirror and slips you notes. This round is about what to trust: what people say, or what they do.',
@@ -313,6 +330,7 @@ export const SESSIONS: Session[] = [
     skills: ['Watch what people do', 'Preference only after use', 'Test 5 users, then iterate', 'Self-reports are 3 steps removed'],
     greet: 'Hi! Two designs, right? Let’s see them.',
     leave: 'I’m sorry, I have a client call. I need to go.',
+    problem: 'Kite customers tap around the homepage before they find everyday tasks like sending money. The team has two redesigns and needs to know which one works better.',
     insights: {
       p1: 'Design A: about 3× longer to find “Send money,” with two wrong taps',
       p2: 'She prefers A but performed better on B. Preference ≠ performance',
@@ -416,15 +434,20 @@ export const SESSIONS: Session[] = [
           note: 'Long open-ended surveys have lower completion rates. Closed questions suit surveys. Save open-ended questions for interviews and tests.', src: 'open' },
       ] },
     ],
-  },
-];
+};
+
+/** Played order matches STEPS without the wall. */
+export const SESSIONS: Session[] = [KICKOFF, LEN, ROSA, DEFINE, IDEATE, LEN_PAPER, THEO, PRIYA, NEXT];
 
 /** Every strong move in the game, in the order players meet them. Collected in the journal. */
 export const MOVES: { tag: string; note: string; src: SrcKey | SrcKey[]; session: string }[] = (() => {
   const seen = new Set<string>();
   const out: { tag: string; note: string; src: SrcKey | SrcKey[]; session: string }[] = [];
   for (const s of SESSIONS) for (const t of s.turns) for (const c of t.choices) {
-    if (c.v === 'best' && !seen.has(c.tag)) { seen.add(c.tag); out.push({ tag: c.tag, note: c.note, src: c.src, session: s.name }); }
+    if (c.v === 'best' && !seen.has(c.tag)) {
+      seen.add(c.tag);
+      out.push({ tag: c.tag, note: c.note, src: c.src, session: s.mode === 'workshop' ? s.kind : s.name });
+    }
   }
   return out;
 })();

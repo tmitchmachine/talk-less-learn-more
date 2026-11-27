@@ -13,6 +13,7 @@ const PROFILES: Record<string, Profile> = {
   player: { g: 'n', pitch: 1.05, rate: 1.04 },
   mae: { g: 'f', pitch: 0.94, rate: 0.96 },
   rosa: { g: 'f', pitch: 1.06, rate: 1.06 },
+  len: { g: 'm', pitch: 0.96, rate: 0.98 },
   theo: { g: 'm', pitch: 1.02, rate: 1.0 },
   priya: { g: 'f', pitch: 0.98, rate: 1.02 },
   jordan: { g: 'm', pitch: 1.1, rate: 1.1 },

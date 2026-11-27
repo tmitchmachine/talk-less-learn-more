@@ -1,8 +1,10 @@
 // DOM interface drawn over the game canvas. Text stays sharp and readable at any size,
 // and every control is a real button for keyboard, mouse, touch and screen readers.
 import { SRC, type SrcKey } from '../data/sources';
-import { MOVES, SESSIONS, type Choice, type Session } from '../data/sessions';
+import { MOVES, SESSIONS, sessionWho, type Choice, type Session } from '../data/sessions';
 import { BINS, type BinKey, type SortCard } from '../data/sort';
+import { claimsFor } from '../data/claims';
+import { DEFINED_STATEMENT, KICKOFF_STATEMENT, OTHER_CYCLE_METHODS } from '../data/steps';
 import { PORTRAIT_URL } from '../art/draw';
 import { sfx, music } from '../audio';
 import { voice } from '../voice';
@@ -234,8 +236,9 @@ export const ui = {
               <li><b>Talk</b> with E or Space, or tap the prompt.</li>
               <li><b>In a session</b>, pick what to say with 1–4 or a tap. Silence is often an option.</li>
               <li><b>Openness</b> drops when you lead, pitch or interrupt. At zero, the customer leaves.</li>
-              <li><b>Insight</b> rises when customers tell you what really happens. Strong moves pin sticky notes to your wall.</li>
+              <li><b>Insight</b> rises when customers tell you what really happens. After a session, tell the team or park each note.</li>
               <li><b>Bias</b> rises when your words end up in their mouths. Your score loses half a point for each point of bias.</li>
+              <li><b>Start with the problem</b>: who, what, where, when, why — and leave the solution out.</li>
               <li><b>Listen</b> to any line again with the speaker button. Turn on “Read everything aloud” in Settings to hear coaching tips too.</li>
             </ul>`;
           }
@@ -343,9 +346,14 @@ export const ui = {
   /* ---------- session intro ---------- */
   sessionIntro(s: Session, rec: { stars: number; plays: number } | undefined): Promise<boolean> {
     return new Promise((resolve) => {
+      const who = sessionWho(s);
+      const workshop = s.mode === 'workshop';
+      const startBtn = workshop
+        ? `<button class="pbtn" data-a="yes">Start</button>`
+        : `<button class="pbtn rec-btn" data-a="yes"><i class="rec-dot"></i>Start recording</button>`;
       const m = modal(`
         <div class="intro-head">
-          <img class="intro-face" src="${PORTRAIT_URL[s.id]}" alt="">
+          <img class="intro-face" src="${PORTRAIT_URL[who] ?? ''}" alt="">
           <div>
             <div class="eyebrow">${esc(s.code)} · ${esc(s.kind)} · ${esc(s.place)}</div>
             <h2>${esc(s.name)}</h2>
@@ -356,19 +364,24 @@ export const ui = {
         <p class="intro-greet"><span>“${esc(s.greet)}”</span>${listenBtn('Hear the briefing')}</p>
         <p>${esc(s.setup)}</p>
         <div class="goal"><b>Research goal</b>${esc(s.goal)}</div>
+        ${s.problem ? `<div class="goal"><b>Problem statement</b>${esc(s.problem)}</div>` : ''}
         <div class="chips">${s.skills.map((k) => `<span>${esc(k)}</span>`).join('')}</div>
         <div class="row-end">
           <button class="pbtn alt" data-a="no">Not now</button>
-          <button class="pbtn rec-btn" data-a="yes"><i class="rec-dot"></i>Start recording</button>
+          ${startBtn}
         </div>
       `, 'intro');
       const brief = (force = false) => {
-        void voice.say(s.greet, s.id, { force });
-        if (force || voice.narrating()) { void voice.say(s.setup, 'narrator', { queue: true, force }); void voice.say(`Research goal: ${s.goal}`, 'narrator', { queue: true, force }); }
+        void voice.say(s.greet, who, { force });
+        if (force || voice.narrating()) {
+          void voice.say(s.setup, 'narrator', { queue: true, force });
+          void voice.say(`Research goal: ${s.goal}`, 'narrator', { queue: true, force });
+          if (s.problem) void voice.say(`Problem statement: ${s.problem}`, 'narrator', { queue: true, force });
+        }
       };
       brief();
       wireListen(m.box, () => brief(true));
-      const stopSync = lipSync(m.box.querySelector<HTMLImageElement>('.intro-face')!, () => s.id);
+      const stopSync = lipSync(m.box.querySelector<HTMLImageElement>('.intro-face')!, () => who);
       const done = (v: boolean) => { off(); stopSync(); voice.stop(); m.close(); if (v) sfx.talk(); resolve(v); };
       m.box.querySelector<HTMLButtonElement>('[data-a=yes]')!.onclick = () => done(true);
       m.box.querySelector<HTMLButtonElement>('[data-a=no]')!.onclick = () => done(false);
@@ -394,6 +407,26 @@ export const ui = {
     });
   },
 
+  pick(title: string, options: { id: string; label: string }[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      const m = modal(`
+        <h2>${esc(title)}</h2>
+        <div class="choices" style="margin-top:0.75rem">${options.map((o, i) =>
+          `<button class="choice" data-id="${esc(o.id)}"><kbd>${i + 1}</kbd><span>${esc(o.label)}</span></button>`).join('')}</div>
+        <div class="row-end" style="margin-top:0.75rem"><button class="pbtn alt" data-a="no">Cancel</button></div>
+      `, 'small');
+      const done = (v: string | null) => { off(); m.close(); resolve(v); };
+      m.box.querySelectorAll<HTMLButtonElement>('.choice').forEach((b) => (b.onclick = () => { sfx.select(); done(b.dataset.id!); }));
+      m.box.querySelector<HTMLButtonElement>('[data-a=no]')!.onclick = () => done(null);
+      const off = pushKeys((e) => {
+        if (e.key === 'Escape') { done(null); return true; }
+        const n = Number(e.key);
+        if (n >= 1 && n <= options.length) { sfx.select(); done(options[n - 1].id); return true; }
+        return false;
+      });
+    });
+  },
+
   /* ---------- journal ---------- */
   journal() {
     let tab: 'insights' | 'moves' | 'articles' = 'insights';
@@ -413,20 +446,39 @@ export const ui = {
         body.innerHTML = SESSIONS.map((s) => {
           const keys = Object.keys(s.insights);
           const got = keys.filter((k) => state.insights.includes(k)).length;
-          return `<section class="j-sec"><h3>${esc(s.code)} · ${esc(s.name)} <span class="muted">${got}/${keys.length}</span></h3>
+          const title = s.mode === 'workshop' ? `${s.code} · ${s.kind}` : `${s.code} · ${s.name}`;
+          let extra = '';
+          if (s.id === 'define' && state.insights.includes('d5')) {
+            extra = `<p class="j-statement"><b>Refined statement</b> ${esc(DEFINED_STATEMENT)}</p>
+              <p class="muted"><b>Kickoff (history)</b> ${esc(KICKOFF_STATEMENT)}</p>`;
+          } else if (s.id === 'kickoff' && got === keys.length) {
+            extra = `<p class="j-statement"><b>Problem statement</b> ${esc(KICKOFF_STATEMENT)}</p>`;
+          }
+          const claims = claimsFor(s.id);
+          const readings = state.readings[s.id] ?? [];
+          if (claims.length && s.mode !== 'workshop') {
+            const told = claims.filter((c) => c.call === 'tell' && readings.includes(c.id));
+            const parked = claims.filter((c) => c.call === 'park' && readings.includes(c.id));
+            const n = readings.filter((id) => claims.some((c) => c.id === id)).length;
+            extra += `<p class="muted">${n} of ${claims.length} called</p>
+              <h4>Told the team</h4><div class="stickies">${told.length ? told.map((c) => `<div class="sticky">${esc(c.text)}</div>`).join('') : '<div class="sticky locked">None yet</div>'}</div>
+              <h4>Parked</h4><div class="stickies">${parked.length ? parked.map((c) => `<div class="sticky">${esc(c.text)}</div>`).join('') : '<div class="sticky locked">None yet</div>'}</div>`;
+          }
+          return `<section class="j-sec"><h3>${esc(title)} <span class="muted">${got}/${keys.length}</span></h3>
             <div class="stickies">${keys.map((k) => state.insights.includes(k)
               ? `<div class="sticky">${esc(s.insights[k])}</div>`
-              : `<div class="sticky locked">Not found yet</div>`).join('')}</div></section>`;
+              : `<div class="sticky locked">Not found yet</div>`).join('')}</div>${extra}</section>`;
         }).join('');
       } else if (tab === 'moves') {
         const got = MOVES.filter((mv) => state.moves.includes(mv.tag)).length;
         body.innerHTML = `<p class="muted">${got} of ${MOVES.length} strong moves collected. Use a strong move in a session to learn it.</p>
           <div class="moves">${MOVES.map((mv) => state.moves.includes(mv.tag)
             ? `<div class="move"><b>${esc(mv.tag)}</b><p>${esc(mv.note)}</p><small>${srcLinks(mv.src)}</small></div>`
-            : `<div class="move locked"><b>???</b><p>Hidden in ${esc(mv.session)}’s session.</p></div>`).join('')}</div>`;
+            : `<div class="move locked"><b>???</b><p>${mv.session.match(/^(Kickoff|Define|Ideate|Next)/) ? `Hidden in Mae’s ${esc(mv.session)}.` : `Hidden in ${esc(mv.session)}’s session.`}</p></div>`).join('')}</div>`;
       } else {
         body.innerHTML = `<p class="muted">Every lesson in this game comes from these Nielsen Norman Group articles.</p>
-          <ul class="articles">${(Object.keys(SRC) as SrcKey[]).map((k) => `<li><a href="${SRC[k].u}" target="_blank" rel="noopener">${esc(SRC[k].t)}</a></li>`).join('')}</ul>`;
+          <ul class="articles">${(Object.keys(SRC) as SrcKey[]).map((k) => `<li><a href="${SRC[k].u}" target="_blank" rel="noopener">${esc(SRC[k].t)}</a></li>`).join('')}</ul>
+          <p class="muted" style="margin-top:1rem">${esc(OTHER_CYCLE_METHODS)}</p>`;
       }
     };
     m.box.querySelectorAll<HTMLButtonElement>('[data-t]').forEach((b) => (b.onclick = () => { tab = b.dataset.t as typeof tab; sfx.blip(); render(); }));
@@ -478,11 +530,12 @@ export const ui = {
   convoOpen(s: Session, onQuit: () => void) {
     ui.convoClose();
     busyCount++;
-    const wrap = el(`<div id="convo">
+    const workshop = s.mode === 'workshop';
+    const wrap = el(`<div id="convo" class="${workshop ? 'workshop' : ''}">
       <div class="cv-top panel slim">
-        <div class="cv-id"><span class="rec"><i></i>REC <b class="cv-t mono">00:00:00</b></span><span class="cv-who">${esc(s.code)} · ${esc(s.kind)} · ${esc(s.name)}</span></div>
+        <div class="cv-id">${workshop ? '' : `<span class="rec"><i></i>REC <b class="cv-t mono">00:00:00</b></span>`}<span class="cv-who">${esc(s.code)} · ${esc(s.kind)} · ${esc(s.name)}</span></div>
         <div class="cv-meters">
-          <div class="mtr" data-m="open"><span>Openness</span><div class="bar"><i></i></div></div>
+          ${workshop ? '' : `<div class="mtr" data-m="open"><span>Openness</span><div class="bar"><i></i></div></div>`}
           <div class="mtr" data-m="ins"><span>Insight <b></b></span><div class="bar"><i></i></div></div>
           <div class="mtr" data-m="bias"><span>Bias <b></b></span><div class="bar"><i></i></div></div>
           <div class="streak" hidden>Flow ×<b></b></div>
@@ -521,19 +574,21 @@ export const ui = {
     const c = ui.convo;
     if (!c) return;
     const set = (k: string, pct: number, label?: string) => {
-      const mtr = c.wrap.querySelector<HTMLElement>(`.mtr[data-m=${k}]`)!;
+      const mtr = c.wrap.querySelector<HTMLElement>(`.mtr[data-m=${k}]`);
+      if (!mtr) return;
       mtr.querySelector<HTMLElement>('i')!.style.width = `${Math.max(0, Math.min(100, pct))}%`;
       if (label !== undefined) mtr.querySelector('b')!.textContent = label;
     };
     set('open', m.open);
-    set('ins', (m.ins / m.mx) * 100, `${m.ins}`);
+    set('ins', m.mx ? (m.ins / m.mx) * 100 : 0, `${m.ins}`);
     set('bias', m.bias, `${m.bias}`);
-    c.wrap.querySelector('.mtr[data-m=open]')!.classList.toggle('low', m.open <= 25);
-    c.wrap.querySelector('.mtr[data-m=bias]')!.classList.toggle('hot', m.bias >= 50);
+    c.wrap.querySelector('.mtr[data-m=open]')?.classList.toggle('low', m.open <= 25);
+    c.wrap.querySelector('.mtr[data-m=bias]')?.classList.toggle('hot', m.bias >= 50);
     const st = c.wrap.querySelector<HTMLElement>('.streak')!;
     st.hidden = m.streak < 2;
     st.querySelector('b')!.textContent = String(m.streak);
-    c.wrap.querySelector('.cv-t')!.textContent = m.t;
+    const tEl = c.wrap.querySelector('.cv-t');
+    if (tEl) tEl.textContent = m.t;
   },
 
   convoLine(o: { ctx?: string; speaker: string; voiceId: string; mood?: string; kind: 'p' | 'obs'; text: string | null }): Promise<void> {
@@ -608,27 +663,29 @@ export const ui = {
     return c.typer.done.then(() => { c.phase = 'idle'; });
   },
 
-  convoCoach(o: { c: Choice; best?: Choice; timedOut: boolean; unlocked: string | null; newMove: boolean; left: boolean }): Promise<void> {
+  convoCoach(o: { c: Choice; best?: Choice; timedOut: boolean; unlocked: string | null; newMove: boolean; left: boolean; debrief?: boolean }): Promise<void> {
     const cv = ui.convo!;
     const act = cv.wrap.querySelector<HTMLElement>('.cv-act')!;
     const ch = o.c;
     const cls = ch.v === 'best' ? 'best' : ch.v === 'ok' ? 'ok' : 'bad';
     const mark = ch.v === 'best' ? '✓' : ch.v === 'ok' ? '~' : '✕';
+    const delta = o.debrief ? '' : `<span class="delta mono">+${ch.ins} insight · +${ch.bias} bias</span>`;
+    const contLabel = o.debrief ? 'Next note' : o.left ? 'End session' : 'Continue';
     act.innerHTML = `<div class="coach">
-      <div class="coach-head"><span class="chip ${cls}">${mark} ${esc(ch.tag)}</span><span class="delta mono">+${ch.ins} insight · +${ch.bias} bias</span>${listenBtn('Hear the coaching tip')}</div>
+      <div class="coach-head"><span class="chip ${cls}">${mark} ${esc(ch.tag)}</span>${delta}${listenBtn('Hear the coaching tip')}</div>
       ${o.timedOut ? `<p class="coach-time">Time ran out, so you stayed quiet.</p>` : ''}
-      ${o.unlocked ? `<div class="unlock"><i class="mini-note"></i>Pinned to your wall: “${esc(o.unlocked)}”</div>` : ''}
+      ${o.unlocked ? `<div class="unlock"><i class="mini-note"></i>You heard this: “${esc(o.unlocked)}”</div>` : ''}
       ${o.newMove ? `<div class="newmove">New move for your journal: <b>${esc(ch.tag)}</b></div>` : ''}
       <p class="coach-note">${esc(ch.note)}</p>
       ${ch.quote ? `<blockquote>${esc(ch.quote)}</blockquote>` : ''}
       ${o.best ? `<p class="coach-better"><b>Stronger move (${esc(o.best.tag)}):</b> ${esc(o.best.say)}</p>` : ''}
-      <div class="coach-foot"><span class="src">Source: ${srcLinks(ch.src)}</span><button class="pbtn" data-a="cont">${o.left ? 'End session' : 'Continue'} <kbd>Space</kbd></button></div>
+      <div class="coach-foot"><span class="src">Source: ${srcLinks(ch.src)}</span><button class="pbtn" data-a="cont">${contLabel} <kbd>Space</kbd></button></div>
     </div>`;
     cv.wrap.querySelector<HTMLElement>('.cv-bottom')!.scrollTop = 0;
     cv.phase = 'coach';
     const tip = () => [
       `${ch.v === 'best' ? 'Strong move' : ch.v === 'ok' ? 'Okay move' : 'Weak move'}: ${ch.tag}.`,
-      o.unlocked ? `Pinned to your wall: ${o.unlocked}.` : '',
+      o.unlocked ? `You heard this: ${o.unlocked}.` : '',
       ch.note,
       o.best ? `A stronger move would be ${o.best.tag}: ${o.best.say}` : '',
     ].filter(Boolean).join(' ');

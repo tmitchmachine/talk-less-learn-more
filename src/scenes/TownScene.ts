@@ -2,9 +2,10 @@ import Phaser from 'phaser';
 import { buildTown, H, T, W, type Facing } from '../world/map';
 import { SOLID_TILES, TILE, TREE_KINDS, makeGroundDetail, mulberry32, type Emote } from '../art/draw';
 import { CAST } from '../data/cast';
-import { SESSIONS } from '../data/sessions';
-import { NOTICEBOARD, TOWNSFOLK, maeLines } from '../data/townsfolk';
-import { isUnlocked, objective, rank, resetSave, save, stage, state, storyStage } from '../state';
+import { SESSIONS, sessionWho, type Session } from '../data/sessions';
+import { NOTICEBOARD, TOWNSFOLK, isWorkshopStep, maeLines } from '../data/townsfolk';
+import { currentStep, objective, open, rank, resetSave, save, state } from '../state';
+import type { StepId } from '../data/steps';
 import { ui } from '../ui/ui';
 import { music, sfx } from '../audio';
 
@@ -139,7 +140,7 @@ export class TownScene extends Phaser.Scene {
       const [gx, gy] = town.gates[g][0];
       this.items.push({
         id: `gate-${g}`, x: gx * T + 8, y: gy * T + 16, label: 'Read the sign',
-        act: () => ui.dialog([{ name: 'Road sign', text: g === 'east' ? 'ROAD CLOSED. Mae will open the east road after your interview with Rosa.' : 'ROAD CLOSED. Mae will open the south road after your session with Theo.' }]),
+        act: () => ui.dialog([{ name: 'Road sign', text: g === 'east' ? 'ROAD CLOSED. Mae will open the east road after your paper test with Len.' : 'ROAD CLOSED. Mae will open the south road after your session with Theo.' }]),
       });
     }
 
@@ -151,12 +152,11 @@ export class TownScene extends Phaser.Scene {
       this.tweens.add({ targets: s, y: y - 1, duration: 520 + Math.random() * 300, yoyo: true, repeat: -1, ease: 'Stepped', delay: Math.random() * 500 });
       this.solid(x - 5, y + 2, 10, 6);
       const name = CAST[n.id].name;
-      const si = SESSIONS.findIndex((ss) => ss.id === n.id);
       const marker = this.add.sprite(x, y - 13, 'emotes', 'excl').setDepth(9999).setVisible(false);
       this.tweens.add({ targets: marker, y: y - 15, duration: 400, yoyo: true, repeat: -1, ease: 'Stepped' });
       let act: () => void | Promise<void>;
       if (n.id === 'mae') act = () => this.talkMae();
-      else if (si >= 0) act = () => this.customer(si);
+      else if (SESSIONS.some((ss) => sessionWho(ss) === n.id)) act = () => this.npcSessions(n.id);
       else act = () => this.townsperson(n.id);
       this.items.push({ id: n.id, x, y: y + 4, label: `Talk to ${name}`, act, npc: s, marker });
     }
@@ -326,7 +326,7 @@ export class TownScene extends Phaser.Scene {
     save();
     ui.hud(true, { journal: () => !ui.busy() && ui.journal(), menu: () => !ui.busy() && ui.menu() });
     music.sync();
-    if (state.maeSeen < 0) this.time.delayedCall(600, () => { if (!ui.busy()) void this.talkMae(); });
+    if (state.maeSeen === '') this.time.delayedCall(600, () => { if (!ui.busy()) void this.talkMae(); });
   }
 
   private onResume() {
@@ -336,28 +336,40 @@ export class TownScene extends Phaser.Scene {
     ui.hud(true);
     music.sync();
     this.refresh(true);
-    if (state.synth.done && state.maeSeen < 4) ui.toast('Go tell Mae what you learned.', 'good');
+    if (currentStep() === 'next' && state.maeSeen !== 'next') ui.toast('Go tell Mae what you learned.', 'good');
+  }
+
+  private sessionsFor(who: string): Session[] {
+    return SESSIONS.filter((s) => sessionWho(s) === who);
   }
 
   /** Updates markers, HUD and road gates to match progress. */
   private refresh(animate: boolean) {
-    const st = storyStage();
+    const step = currentStep();
     for (const it of this.items) {
       if (!it.marker) continue;
       let e: Emote | null = null;
-      if (it.id === 'mae') e = state.maeSeen < st ? 'excl' : null;
-      const si = SESSIONS.findIndex((s) => s.id === it.id);
-      if (si >= 0 && isUnlocked(si)) {
-        const rec = state.sessions[SESSIONS[si].id];
-        e = !rec || rec.stars === 0 ? 'excl' : rec.stars === 3 ? 'star' : 'check';
+      if (it.id === 'mae') {
+        const fresh = state.maeSeen !== step;
+        e = (fresh || isWorkshopStep(step)) ? 'excl' : null;
+      } else {
+        const owned = this.sessionsFor(it.id).filter((s) => open(s.id as StepId));
+        if (owned.length) {
+          const newest = owned[owned.length - 1];
+          const rec = state.sessions[newest.id];
+          e = !rec || rec.stars === 0 ? 'excl' : rec.stars === 3 ? 'star' : 'check';
+        }
       }
       it.marker.setVisible(!!e);
       if (e) it.marker.setFrame(e);
     }
-    this.labMarker.setVisible(stage() >= SESSIONS.length && !state.synth.done);
+    this.labMarker.setVisible(step === 'wall');
     ui.hudUpdate();
-    if (stage() >= 1 && !this.gateOpen.east) this.openGate('east', animate);
-    if (stage() >= 2 && !this.gateOpen.south) this.openGate('south', animate && stage() < 3);
+    const eastJust = open('theo') && !this.gateOpen.east;
+    const southJust = open('priya') && !this.gateOpen.south;
+    const animateOne = animate && Number(eastJust) + Number(southJust) === 1;
+    if (eastJust) this.openGate('east', animateOne);
+    if (southJust) this.openGate('south', animateOne && !eastJust);
   }
 
   private openGate(g: GateName, animate: boolean) {
@@ -411,26 +423,64 @@ export class TownScene extends Phaser.Scene {
   }
 
   private async talkMae() {
-    const st = storyStage();
-    const fresh = state.maeSeen < st;
-    const lines = fresh ? maeLines(st, rank()) : [`Your next step: ${objective()}`, TIPS[this.tipIndex++ % TIPS.length]];
-    await ui.dialog(lines.map((text) => ({ name: 'Mae', text, face: 'mae' })));
+    const step = currentStep();
+    const fresh = state.maeSeen !== step;
     if (fresh) {
-      state.maeSeen = st;
+      await ui.dialog(maeLines(step, rank()).map((text) => ({ name: 'Mae', text, face: 'mae' })));
+      state.maeSeen = step;
       save();
       this.refresh(false);
-      if (st === 0) ui.toast('New objective: interview Rosa at the taco truck.', 'good');
+      ui.toast(`New objective: ${objective()}`, 'good');
+      if (step !== 'done' && isWorkshopStep(step)) await this.offerWorkshop(step);
+      return;
+    }
+    if (step !== 'done' && isWorkshopStep(step)) {
+      await this.offerWorkshop(step);
+      return;
+    }
+    await ui.dialog([
+      { name: 'Mae', text: `Your next step: ${objective()}`, face: 'mae' },
+      { name: 'Mae', text: TIPS[this.tipIndex++ % TIPS.length], face: 'mae' },
+    ]);
+    const finished = SESSIONS.filter((s) => s.mode === 'workshop' && (state.sessions[s.id]?.stars ?? 0) >= 1);
+    if (finished.length) {
+      const pick = await ui.pick('Replay a workshop?', finished.map((s) => ({ id: s.id, label: `${s.code} · ${s.kind}` })));
+      if (pick) {
+        const i = SESSIONS.findIndex((s) => s.id === pick);
+        if (i >= 0) {
+          const go = await ui.sessionIntro(SESSIONS[i], state.sessions[pick]);
+          if (go) this.launch('Conversation', { index: i });
+        }
+      }
     }
   }
 
-  private async customer(i: number) {
-    const s = SESSIONS[i];
-    if (!isUnlocked(i)) {
-      await ui.dialog([{ name: s.name, text: 'Oh, hi! I think Mae has someone else for you to talk to first.', face: s.id }]);
+  private async offerWorkshop(step: StepId) {
+    const s = SESSIONS.find((x) => x.id === step);
+    if (!s) return;
+    const go = await ui.sessionIntro(s, state.sessions[s.id]);
+    if (go) this.launch('Conversation', { index: SESSIONS.indexOf(s) });
+  }
+
+  private async npcSessions(who: string) {
+    const owned = this.sessionsFor(who);
+    const openOnes = owned.filter((s) => open(s.id as StepId));
+    if (!openOnes.length) {
+      const face = who;
+      await ui.dialog([{ name: CAST[who].name, text: 'Oh, hi! I think Mae has someone else for you to talk to first.', face }]);
       return;
     }
+    let s = openOnes[openOnes.length - 1];
+    if (openOnes.length > 1) {
+      const pick = await ui.pick(`Talk to ${CAST[who].name}`, openOnes.slice().reverse().map((x) => ({
+        id: x.id,
+        label: `${x.code} · ${x.kind}`,
+      })));
+      if (!pick) return;
+      s = openOnes.find((x) => x.id === pick)!;
+    }
     const go = await ui.sessionIntro(s, state.sessions[s.id]);
-    if (go) this.launch('Conversation', { index: i });
+    if (go) this.launch('Conversation', { index: SESSIONS.indexOf(s) });
   }
 
   private async townsperson(id: string) {
@@ -439,8 +489,8 @@ export class TownScene extends Phaser.Scene {
   }
 
   private async labDoor() {
-    if (stage() < SESSIONS.length) {
-      await ui.dialog([{ name: 'Lab door', text: 'A sticky note on the door: “Synthesis in progress. Bring notes from all three customers.”' }]);
+    if (!open('wall')) {
+      await ui.dialog([{ name: 'Lab door', text: 'A sticky note on the door: “Synthesis in progress. Come back after your sessions with Theo and Priya.”' }]);
       return;
     }
     const go = await ui.confirm(

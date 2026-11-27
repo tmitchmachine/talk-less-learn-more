@@ -9,6 +9,9 @@ export const SRC = {
   thinkaloud: { t: 'Thinking Aloud: The #1 Usability Tool', u: 'https://www.nngroup.com/articles/thinking-aloud-the-1-usability-tool/' },
   mistakes: { t: '6 Mistakes When Crafting Interview Questions', u: 'https://www.nngroup.com/articles/interview-questions-mistakes/' },
   funnel: { t: 'The Funnel Technique in Qualitative User Research', u: 'https://www.nngroup.com/articles/the-funnel-technique-in-qualitative-user-research/' },
+  thinking: { t: 'Design Thinking 101', u: 'https://www.nngroup.com/articles/design-thinking/' },
+  cheat: { t: 'UX Research Cheat Sheet', u: 'https://www.nngroup.com/articles/ux-research-cheat-sheet/' },
+  problem: { t: 'Problem Statements in UX Discovery', u: 'https://www.nngroup.com/articles/problem-statements/' },
 } as const;
 
 export type SrcKey = keyof typeof SRC;
